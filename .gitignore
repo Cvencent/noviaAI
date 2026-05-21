@@ -1,37 +1,45 @@
-# 依赖项
+# Dependencies
 node_modules/
-.pnpm-store/
 
-# 构建产物
-dist/
-build/
+# Build outputs
+client/dist/
+server/dist/
 
-# 环境变量
+# Environment variables
 .env
 .env.local
 .env.*.local
 
+# Database
+*.db
+*.sqlite
+*.sqlite3
+
+# Logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
 # IDE
-.idea/
 .vscode/
+.idea/
+.claude/
+.sisyphus/
+.trae/
 *.swp
 *.swo
+*~
+
+# Local tool snapshots
+.playwright-mcp/
 
 # OS
 .DS_Store
 Thumbs.db
 
-# 日志
-*.log
-npm-debug.log*
-
-# 测试覆盖率
+# Coverage
 coverage/
 
-# Prisma
-prisma/migrations/
-
-# 类型定义
-*.d.ts
-!.d.ts
-
+# Docker volumes
+postgres_data/

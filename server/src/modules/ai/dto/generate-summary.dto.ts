@@ -9,8 +9,8 @@ export class GenerateSummaryDto {
   chapterId?: string
 
   @IsOptional()
-  @IsEnum(['openai', 'claude'])
-  provider?: 'openai' | 'claude'
+  @IsEnum(['openai', 'claude', 'deepseek', 'mimo'])
+  provider?: 'openai' | 'claude' | 'deepseek' | 'mimo'
 
   @IsOptional()
   @IsString()

@@ -234,6 +234,49 @@ export class ChaptersService {
     return content
   }
 
+  async updateAllContents(
+    userId: string,
+    projectId: string,
+    chapterId: string,
+    body: { title: string; contents: Array<{ content: string; order: number }> },
+  ) {
+    const chapter = await this.findOne(userId, projectId, chapterId)
+
+    // 更新标题
+    if (body.title) {
+      await this.prisma.chapter.update({
+        where: { id: chapterId },
+        data: { title: body.title },
+      })
+    }
+
+    // 删除旧内容
+    await this.prisma.chapterContent.deleteMany({
+      where: { chapterId },
+    })
+
+    // 添加新内容
+    if (body.contents && body.contents.length > 0) {
+      await this.prisma.chapterContent.createMany({
+        data: body.contents.map((c) => ({
+          chapterId,
+          content: c.content,
+          order: c.order,
+        })),
+      })
+    }
+
+    // 重新计算字数
+    const wordCount = await this.calculateWordCount(chapterId)
+    await this.prisma.chapter.update({
+      where: { id: chapterId },
+      data: { wordCount },
+    })
+
+    // 返回更新后的章节
+    return this.findOne(userId, projectId, chapterId)
+  }
+
   async updateContent(
     userId: string,
     projectId: string,

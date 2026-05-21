@@ -1,37 +1,9 @@
-import axios from 'axios'
 import type { 
   Project, 
   CreateProjectDto, 
   UpdateProjectDto 
 } from '../types/project'
-
-const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:3000'
-
-const apiClient = axios.create({
-  baseURL: API_BASE_URL,
-  headers: {
-    'Content-Type': 'application/json',
-  },
-})
-
-apiClient.interceptors.request.use((config) => {
-  const token = localStorage.getItem('accessToken')
-  if (token) {
-    config.headers.Authorization = `Bearer ${token}`
-  }
-  return config
-})
-
-apiClient.interceptors.response.use(
-  (response) => response,
-  (error) => {
-    if (error.response?.status === 401) {
-      localStorage.removeItem('accessToken')
-      window.location.href = '/login'
-    }
-    return Promise.reject(error)
-  }
-)
+import { apiClient } from './client'
 
 export const projectsApi = {
   async getAll(): Promise<Project[]> {
@@ -46,6 +18,21 @@ export const projectsApi = {
 
   async create(data: CreateProjectDto): Promise<Project> {
     const response = await apiClient.post('/projects', data)
+    return response.data
+  },
+
+  async aiGenerate(description: string): Promise<Project> {
+    const response = await apiClient.post('/projects/ai-generate', { description })
+    return response.data
+  },
+
+  async aiGenerateCharacters(id: string, count?: number): Promise<any[]> {
+    const response = await apiClient.post(`/projects/${id}/ai-generate-characters`, { count })
+    return response.data
+  },
+
+  async aiGenerateWorldSettings(id: string, count?: number): Promise<any[]> {
+    const response = await apiClient.post(`/projects/${id}/ai-generate-world-settings`, { count })
     return response.data
   },
 

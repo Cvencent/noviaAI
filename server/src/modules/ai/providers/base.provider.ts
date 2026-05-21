@@ -16,5 +16,8 @@ export interface CompletionOptions {
 
 export interface AIProvider {
   chat(options: CompletionOptions): Promise<string>
+  chatStream(options: CompletionOptions): AsyncGenerator<string>
   getProviderName(): string
+  setApiKey(apiKey: string): void
+  setBaseUrl(baseUrl: string): void
 }

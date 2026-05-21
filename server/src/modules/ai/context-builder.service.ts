@@ -1,34 +1,218 @@
-import { Injectable } from '@nestjs/common'
+import { Injectable, NotFoundException } from '@nestjs/common'
 import { PrismaService } from '../../prisma/prisma.service'
+import { ProgressiveCharacterContextService } from '../characters/progressive-character-context.service'
+import { DEFAULT_ANTI_AI_RULES } from '../../common/constants/anti-ai-rules'
+
+export interface ContextPreviewSection {
+  id: string
+  title: string
+  priority: 'critical' | 'high' | 'medium' | 'low'
+  source: string
+  items: string[]
+  tokenEstimate: number
+}
+
+export interface ContextPreview {
+  projectId: string
+  chapterId?: string
+  sections: ContextPreviewSection[]
+  totalTokenEstimate: number
+  warnings: string[]
+}
 
 @Injectable()
 export class ContextBuilderService {
-  constructor(private prisma: PrismaService) {}
+  constructor(
+    private prisma: PrismaService,
+    private progressiveContext: ProgressiveCharacterContextService,
+  ) {}
 
-  async buildWritingContext(projectId: string, currentContent?: string): Promise<string> {
+  private estimateTokens(text: string): number {
+    return Math.ceil(text.length / 2)
+  }
+
+  async buildContextPreview(
+    projectId: string,
+    userId: string,
+    options: { chapterId?: string; currentText?: string } = {},
+  ): Promise<ContextPreview> {
+    const project = await this.prisma.project.findFirst({
+      where: { id: projectId, userId },
+    })
+
+    if (!project) {
+      throw new NotFoundException('Project not found')
+    }
+
+    const sections: ContextPreviewSection[] = []
+    const warnings: string[] = []
+
+    // Project section
+    const projectItems: string[] = [`标题：${project.title}`]
+    if (project.genre) projectItems.push(`类型：${project.genre}`)
+    if (project.synopsis) projectItems.push(`简介：${project.synopsis}`)
+    sections.push({
+      id: 'project',
+      title: '项目信息',
+      priority: 'critical',
+      source: 'project',
+      items: projectItems,
+      tokenEstimate: this.estimateTokens(projectItems.join('\n')),
+    })
+
+    // Lorebook section
+    const loreEntries = await this.prisma.loreEntry.findMany({
+      where: { projectId, isActive: true },
+      orderBy: { priority: 'desc' },
+    })
+
+    let matchedEntries: typeof loreEntries
+    if (options.currentText && options.currentText.trim().length > 0) {
+      const textLower = options.currentText.toLowerCase()
+      matchedEntries = loreEntries.filter((entry) => {
+        const keywords = entry.keywords
+          .split(',')
+          .map((k) => k.trim().toLowerCase())
+          .filter((k) => k.length > 0)
+        return keywords.some((kw) => textLower.includes(kw))
+      })
+    } else {
+      matchedEntries = loreEntries.slice(0, 10)
+    }
+
+    const loreItems = matchedEntries.map(
+      (entry) => `[${entry.category}] ${entry.name}：${entry.description}`,
+    )
+    sections.push({
+      id: 'lorebook',
+      title: 'Lorebook 设定',
+      priority: 'high',
+      source: 'loreEntry',
+      items: loreItems,
+      tokenEstimate: this.estimateTokens(loreItems.join('\n')),
+    })
+
+    // Structure section
+    const [chekhovsGuns, outlines, turningPoints, timelineEvents] = await Promise.all([
+      this.prisma.chekhovsGun.findMany({ where: { projectId } }),
+      this.prisma.outline.findMany({ where: { projectId }, include: { items: true } }),
+      this.prisma.turningPoint.findMany({ where: { projectId }, orderBy: { order: 'asc' } }),
+      this.prisma.timelineEvent.findMany({ where: { projectId }, orderBy: { order: 'asc' } }),
+    ])
+
+    const structureItems: string[] = []
+    for (const gun of chekhovsGuns) {
+      structureItems.push(`契诃夫之枪：${gun.name}（${gun.status}）— ${gun.description}`)
+    }
+    for (const outline of outlines) {
+      structureItems.push(`大纲：${outline.title}`)
+      if (outline.items) {
+        for (const item of outline.items) {
+          structureItems.push(`  - ${item.title}${item.goal ? `：${item.goal}` : ''}`)
+        }
+      }
+    }
+    for (const tp of turningPoints) {
+      structureItems.push(`转折点：${tp.title}（${tp.type}）${tp.description ? `— ${tp.description}` : ''}`)
+    }
+    for (const te of timelineEvents) {
+      structureItems.push(`时间线：${te.title}${te.timeLabel ? `（${te.timeLabel}）` : ''}${te.description ? `— ${te.description}` : ''}`)
+    }
+    sections.push({
+      id: 'structure',
+      title: '结构与剧情',
+      priority: 'high',
+      source: 'chekhovsGun,outline,turningPoint,timelineEvent',
+      items: structureItems,
+      tokenEstimate: this.estimateTokens(structureItems.join('\n')),
+    })
+
+    // Style section
+    const styleItems: string[] = []
+    if (project.currentWritingStyleId) {
+      const customStyle = await this.prisma.customWritingStyle.findUnique({
+        where: { id: project.currentWritingStyleId },
+      })
+      if (customStyle) {
+        styleItems.push(`写作风格：${customStyle.name}`)
+        if (customStyle.description) styleItems.push(`描述：${customStyle.description}`)
+        if (customStyle.config) styleItems.push(`配置：${customStyle.config}`)
+      }
+    }
+    if (project.writingStyleConfig) {
+      styleItems.push(`风格参数：${project.writingStyleConfig}`)
+    }
+    if (styleItems.length === 0) {
+      styleItems.push('未配置写作风格')
+    }
+    sections.push({
+      id: 'style',
+      title: '写作风格',
+      priority: 'medium',
+      source: 'customWritingStyle,project',
+      items: styleItems,
+      tokenEstimate: this.estimateTokens(styleItems.join('\n')),
+    })
+
+    // Character voice section
+    const characters = await this.prisma.character.findMany({
+      where: { projectId, voice: { not: null } },
+    })
+    const voiceItems = characters.map((char) => `${char.name}：${char.voice}`)
+    sections.push({
+      id: 'character-voice',
+      title: '角色语言风格',
+      priority: 'medium',
+      source: 'character',
+      items: voiceItems,
+      tokenEstimate: this.estimateTokens(voiceItems.join('\n')),
+    })
+
+    // Anti-AI rules section
+    sections.push({
+      id: 'anti-ai-rules',
+      title: '反 AI 味约束',
+      priority: 'high',
+      source: 'default',
+      items: [...DEFAULT_ANTI_AI_RULES],
+      tokenEstimate: this.estimateTokens(DEFAULT_ANTI_AI_RULES.join('\n')),
+    })
+
+    const totalTokenEstimate = sections.reduce((sum, s) => sum + s.tokenEstimate, 0)
+
+    return {
+      projectId,
+      chapterId: options.chapterId,
+      sections,
+      totalTokenEstimate,
+      warnings,
+    }
+  }
+
+  formatContextPreviewForPrompt(preview: ContextPreview): string {
+    return preview.sections
+      .filter((section) => section.items.length > 0)
+      .map(
+        (section) =>
+          `## ${section.title}\n${section.items.map((item) => `- ${item}`).join('\n')}`,
+      )
+      .join('\n\n')
+  }
+
+  async buildWritingContext(
+    projectId: string,
+    currentContent?: string,
+    options?: {
+      useProgressiveCharacterContext?: boolean
+      maxCharacterTokens?: number
+      characterPriority?: 'basic' | 'standard' | 'detailed'
+    },
+  ): Promise<string> {
     const project = await this.prisma.project.findUnique({
       where: { id: projectId },
       include: {
         worldSettings: {
           include: { items: true },
-        },
-        characters: {
-          include: {
-            relationshipsFrom: {
-              include: {
-                toCharacter: {
-                  select: { id: true, name: true },
-                },
-              },
-            },
-            relationshipsTo: {
-              include: {
-                fromCharacter: {
-                  select: { id: true, name: true },
-                },
-              },
-            },
-          },
         },
         chapters: {
           include: {
@@ -61,8 +245,8 @@ export class ContextBuilderService {
     if (project.subtitle) context += `副标题：${project.subtitle}\n`
     if (project.synopsis) context += `简介：${project.synopsis}\n`
     if (project.genre) context += `类型：${project.genre}\n`
-    if (project.tags && project.tags.length > 0) {
-      context += `标签：${project.tags.join(', ')}\n`
+    if (project.tags) {
+      context += `标签：${project.tags}\n`
     }
     context += `\n`
 
@@ -87,28 +271,68 @@ export class ContextBuilderService {
       context += `\n`
     }
 
-    if (project.characters && project.characters.length > 0) {
-      context += `# 人物\n`
-      for (const char of project.characters) {
-        context += `## ${char.name} (${char.role})\n`
-        if (char.appearance) context += `外貌：${char.appearance}\n`
-        if (char.personality) context += `性格：${char.personality}\n`
-        if (char.background) context += `背景：${char.background}\n`
-        if (char.goals) context += `目标：${char.goals}\n`
-        if (char.flaws) context += `缺陷：${char.flaws}\n`
-        if (char.voice) context += `语言风格：${char.voice}\n`
+    const useProgressive = options?.useProgressiveCharacterContext ?? true
+    if (useProgressive) {
+      const charResult = await this.progressiveContext.buildProgressiveCharacterContext(
+        projectId,
+        currentContent,
+        {
+          priority: options?.characterPriority || 'standard',
+          maxTokens: options?.maxCharacterTokens || 4000,
+        },
+      )
 
-        const relationships: string[] = []
-        for (const rel of char.relationshipsFrom) {
-          relationships.push(`${char.name}是${rel.toCharacter.name}的${rel.relationship}`)
+      if (charResult.context) {
+        context += charResult.context + '\n'
+
+        if (charResult.truncated) {
+          context += `> 注：共有 ${charResult.totalCharacters} 个人物，已加载 ${charResult.charactersLoaded} 个相关人物\n\n`
         }
-        for (const rel of char.relationshipsTo) {
-          relationships.push(`${rel.fromCharacter.name}是${char.name}的${rel.relationship}`)
+      }
+    } else {
+      const characters = await this.prisma.character.findMany({
+        where: { projectId },
+        include: {
+          relationshipsFrom: {
+            include: {
+              toCharacter: {
+                select: { id: true, name: true },
+              },
+            },
+          },
+          relationshipsTo: {
+            include: {
+              fromCharacter: {
+                select: { id: true, name: true },
+              },
+            },
+          },
+        },
+      })
+
+      if (characters.length > 0) {
+        context += `# 人物\n`
+        for (const char of characters) {
+          context += `## ${char.name} (${char.role || '未设定'})\n`
+          if (char.appearance) context += `外貌：${char.appearance}\n`
+          if (char.personality) context += `性格：${char.personality}\n`
+          if (char.background) context += `背景：${char.background}\n`
+          if (char.goals) context += `目标：${char.goals}\n`
+          if (char.flaws) context += `缺陷：${char.flaws}\n`
+          if (char.voice) context += `语言风格：${char.voice}\n`
+
+          const relationships: string[] = []
+          for (const rel of char.relationshipsFrom) {
+            relationships.push(`${char.name}是${rel.toCharacter.name}的${rel.relationship}`)
+          }
+          for (const rel of char.relationshipsTo) {
+            relationships.push(`${rel.fromCharacter.name}是${char.name}的${rel.relationship}`)
+          }
+          if (relationships.length > 0) {
+            context += `关系：${relationships.join('；')}\n`
+          }
+          context += `\n`
         }
-        if (relationships.length > 0) {
-          context += `关系：${relationships.join('；')}\n`
-        }
-        context += `\n`
       }
     }
 

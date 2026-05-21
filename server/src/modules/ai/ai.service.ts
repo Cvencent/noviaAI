@@ -1,281 +1,405 @@
-import { Injectable, BadRequestException, InternalServerErrorException } from '@nestjs/common'
+import { Injectable, InternalServerErrorException } from '@nestjs/common'
+import { PrismaService } from '../../prisma/prisma.service'
 import { OpenaiProvider } from './providers/openai.provider'
 import { ClaudeProvider } from './providers/claude.provider'
+import { DeepseekProvider } from './providers/deepseek.provider'
+import { MimoProvider } from './providers/mimo.provider'
+import { ChatDto, ConsistencyCheckDto, GenerateSummaryDto, CompleteDto } from './dto'
+import { AIAction, AIProvider as AIConfigProvider } from '../ai-config/dto/create-ai-config.dto'
+import { ApiKeysService } from '../api-keys/api-keys.service'
+import { AIConfigService } from '../ai-config/ai-config.service'
+import { UsageLogsService } from '../usage-logs/usage-logs.service'
+import { StyleApplicationService } from '../writing-styles/style-application.service'
 import { ContextBuilderService } from './context-builder.service'
-import { PrismaService } from '../../prisma/prisma.service'
+import { AIProvider, ChatMessage } from './providers/base.provider'
+import axios from 'axios'
+import { Prisma } from '@prisma/client'
 
-export interface CompleteDto {
-  projectId: string
-  content: string
-  provider?: 'openai' | 'claude'
-  model?: string
-  temperature?: number
-  maxTokens?: number
-}
+type ProviderName = 'openai' | 'claude' | 'deepseek' | 'mimo'
 
-export interface ConsistencyCheckDto {
-  projectId: string
-  content: string
-  provider?: 'openai' | 'claude'
-  model?: string
-}
+const DEFAULT_CHAT_ACTION = AIAction.DIALOGUE_GENERATION
 
-export interface GenerateSummaryDto {
-  projectId: string
-  chapterId?: string
-  provider?: 'openai' | 'claude'
-  model?: string
-}
-
-export interface ChatDto {
-  projectId: string
-  message: string
-  history?: Array<{ role: string; content: string }>
-  provider?: 'openai' | 'claude'
-  model?: string
-  temperature?: number
+const DEFAULT_MODELS: Record<ProviderName, string> = {
+  openai: 'gpt-4',
+  claude: 'claude-3-sonnet-20240229',
+  deepseek: 'deepseek-chat',
+  mimo: 'xiaomi/mimo-v2.5-pro',
 }
 
 @Injectable()
 export class AiService {
-  private defaultModel = 'gpt-4'
-
   constructor(
+    private prisma: PrismaService,
     private openaiProvider: OpenaiProvider,
     private claudeProvider: ClaudeProvider,
-    private contextBuilder: ContextBuilderService,
-    private prisma: PrismaService,
+    private deepseekProvider: DeepseekProvider,
+    private mimoProvider: MimoProvider,
+    private apiKeysService: ApiKeysService,
+    private aiConfigService: AIConfigService,
+    private usageLogsService: UsageLogsService,
+    private styleApplicationService: StyleApplicationService,
+    private contextBuilderService: ContextBuilderService,
   ) {}
 
-  private getProvider(providerName?: 'openai' | 'claude') {
-    const provider = providerName === 'claude' ? this.claudeProvider : this.openaiProvider
-    if (providerName === 'claude') {
-      this.claudeProvider.setApiKey(process.env.CLAUDE_API_KEY || '')
-    } else {
-      this.openaiProvider.setApiKey(process.env.OPENAI_API_KEY || '')
-    }
-    return provider
-  }
-
-  async complete(dto: CompleteDto): Promise<{ result: string }> {
-    const { projectId, content, provider, model, temperature, maxTokens } = dto
-
-    const project = await this.prisma.project.findUnique({
-      where: { id: projectId },
-    })
-
-    if (!project) {
-      throw new BadRequestException('项目不存在')
+  async chat(userId: string, dto: ChatDto) {
+    const config = await this.aiConfigService.getConfig(userId, dto.action ?? DEFAULT_CHAT_ACTION)
+    const providerName = this.toProviderName(dto.provider ?? config?.provider) ?? 'openai'
+    const model = dto.model || config?.model || DEFAULT_MODELS[providerName]
+    const provider = this.getProvider(providerName)
+    const keyData = await this.getApiKey(userId, providerName)
+    
+    if (!keyData) {
+      throw new InternalServerErrorException('未配置 API Key')
     }
 
-    const writingContext = await this.contextBuilder.buildWritingContext(projectId, content)
-    const aiProvider = this.getProvider(provider)
-
-    const systemPrompt = `你是一位专业的小说作家，擅长续写故事内容。请根据提供的上下文信息，续写故事。
-
-续写要求：
-1. 保持与前文的文风一致
-2. 遵循已有的世界观和人物设定
-3. 情节发展要自然合理
-4. 不要重复已有内容
-5. 续写长度适中，保持故事节奏
-
-请直接输出续写内容，不要添加任何解释。`
-
-    const messages = [
-      { role: 'system' as const, content: systemPrompt },
-      { role: 'user' as const, content: `${writingContext}\n\n请续写以下内容：\n${content}` },
-    ]
-
-    const result = await aiProvider.chat({
-      model: model || this.defaultModel,
-      messages,
-      temperature: temperature ?? 0.7,
-      maxTokens: maxTokens || 2000,
-    })
-
-    return { result }
-  }
-
-  async consistencyCheck(dto: ConsistencyCheckDto): Promise<{ issues: string[] }> {
-    const { projectId, content, provider, model } = dto
-
-    const project = await this.prisma.project.findUnique({
-      where: { id: projectId },
-    })
-
-    if (!project) {
-      throw new BadRequestException('项目不存在')
+    provider.setApiKey(keyData.apiKey)
+    if (keyData.baseUrl) {
+      provider.setBaseUrl(keyData.baseUrl)
     }
 
-    const writingContext = await this.contextBuilder.buildWritingContext(projectId, content)
-    const aiProvider = this.getProvider(provider)
-
-    const systemPrompt = `你是一位专业的小说编辑，擅长检查故事内容的一致性问题。
-
-请检查以下内容是否存在以下问题：
-1. 人物设定不一致（如外貌、性格、能力的矛盾）
-2. 时间线矛盾
-3. 世界观规则冲突
-4. 前后情节矛盾
-5. 人物关系冲突
-6. 地理/空间位置矛盾
-
-请仔细分析并列出发现的所有一致性问题。
-
-请以JSON格式输出：
-{
-  "issues": ["问题1", "问题2", ...]
-}
-
-如果没有发现问题，返回空的issues数组。`
-
-    const messages = [
-      { role: 'system' as const, content: systemPrompt },
-      { role: 'user' as const, content: `${writingContext}\n\n请检查以下内容的一致性：\n${content}` },
-    ]
+    const messages: ChatMessage[] = dto.history 
+      ? [...dto.history, { role: 'user' as const, content: dto.message }]
+      : [{ role: 'user' as const, content: dto.message }]
 
     try {
-      const result = await aiProvider.chat({
-        model: model || this.defaultModel,
+      const result = await provider.chat({
+        model,
         messages,
-        temperature: 0.3,
-        maxTokens: 2000,
+        temperature: dto.temperature,
       })
 
-      const parsed = JSON.parse(result)
-      return { issues: parsed.issues || [] }
-    } catch (error) {
-      if (error instanceof SyntaxError) {
-        return { issues: ['无法解析AI返回结果'] }
-      }
-      throw error
+      await this.logUsage(userId, dto.projectId, 'chat', 'POST', 200, messages, result)
+
+      return { response: result }
+    } catch (error: any) {
+      await this.logUsage(userId, dto.projectId, 'chat', 'POST', 500, messages, null)
+      throw new InternalServerErrorException(`AI 调用失败: ${error.message}`)
     }
   }
 
-  async generateSummary(dto: GenerateSummaryDto): Promise<{ summary: string }> {
-    const { projectId, chapterId, provider, model } = dto
+  async consistencyCheck(userId: string, dto: ConsistencyCheckDto) {
+    const config = await this.aiConfigService.getConfig(userId, AIAction.CONSISTENCY_CHECK)
+    const providerName = this.toProviderName(dto.provider ?? config?.provider) ?? 'claude'
+    const model = dto.model || config?.model || 'claude-3-sonnet-20240229'
+    
+    const keyData = await this.getApiKey(userId, providerName)
+    if (!keyData) {
+      throw new InternalServerErrorException('未配置 API Key')
+    }
 
-    const project = await this.prisma.project.findUnique({
-      where: { id: projectId },
-    })
+    const provider = this.getProvider(providerName)
+    provider.setApiKey(keyData.apiKey)
+    if (keyData.baseUrl) {
+      provider.setBaseUrl(keyData.baseUrl)
+    }
 
-    if (!project) {
-      throw new BadRequestException('项目不存在')
+    const context = await this.buildContext(dto.projectId)
+    
+    const systemPrompt = `你是一位专业的小说一致性检查员。请检查以下内容是否存在以下问题：
+1. 人物外貌描述前后不一致
+2. 人物性格与行为不符
+3. 时间线矛盾
+4. 地点描述矛盾
+5. 人物关系矛盾
+
+上下文信息：
+${context}
+
+请分析并给出问题列表和改进建议。`
+
+    try {
+      const result = await provider.chat({
+        model,
+        messages: [
+          { role: 'system' as const, content: systemPrompt },
+          { role: 'user' as const, content: dto.content },
+        ],
+        temperature: 0.3,
+      })
+
+      return { result }
+    } catch (error: any) {
+      throw new InternalServerErrorException(`一致性检查失败: ${error.message}`)
+    }
+  }
+
+  async generateSummary(userId: string, dto: GenerateSummaryDto) {
+    const config = await this.aiConfigService.getConfig(userId, AIAction.SUMMARY_GENERATION)
+    const providerName = this.toProviderName(dto.provider ?? config?.provider) ?? 'openai'
+    const model = dto.model || config?.model || 'gpt-4'
+    
+    const keyData = await this.getApiKey(userId, providerName)
+    if (!keyData) {
+      throw new InternalServerErrorException('未配置 API Key')
+    }
+
+    const provider = this.getProvider(providerName)
+    provider.setApiKey(keyData.apiKey)
+    if (keyData.baseUrl) {
+      provider.setBaseUrl(keyData.baseUrl)
     }
 
     let content = ''
-    let title = project.title
-
-    if (chapterId) {
+    
+    if (dto.chapterId) {
       const chapter = await this.prisma.chapter.findUnique({
-        where: { id: chapterId },
+        where: { id: dto.chapterId },
         include: {
           contents: {
             orderBy: { order: 'asc' },
           },
         },
       })
-
-      if (!chapter) {
-        throw new BadRequestException('章节不存在')
+      
+      if (chapter) {
+        content = chapter.contents.map(c => c.content).join('\n')
       }
-
-      if (chapter.projectId !== projectId) {
-        throw new BadRequestException('章节不属于此项目')
-      }
-
-      title = chapter.title
-      content = chapter.contents.map((c) => c.content).join('\n')
-    } else {
-      const chapters = await this.prisma.chapter.findMany({
-        where: { projectId },
-        include: {
-          contents: {
-            orderBy: { order: 'asc' },
-          },
-        },
-        orderBy: { order: 'asc' },
-      })
-
-      content = chapters.map((c) => `第${c.order + 1}章 ${c.title}:\n${c.contents.map((co) => co.content).join('\n')}`).join('\n\n')
     }
 
-    const aiProvider = this.getProvider(provider)
+    if (!content) {
+      throw new InternalServerErrorException('未找到章节内容')
+    }
 
-    const systemPrompt = `你是一位专业的小说编辑，擅长总结章节或故事内容。
+    const systemPrompt = '请为以下小说章节生成简洁准确的摘要（100字以内）：'
 
-请为以下内容生成简洁准确的摘要。摘要应该：
-1. 概括主要情节和事件
-2. 突出重要的人物互动
-3. 标注关键转折点
-4. 保持客观中立
+    try {
+      const result = await provider.chat({
+        model,
+        messages: [
+          { role: 'system' as const, content: systemPrompt },
+          { role: 'user' as const, content },
+        ],
+        temperature: 0.3,
+      })
 
-请直接输出摘要，不要添加任何前缀或解释。`
-
-    const messages = [
-      { role: 'system' as const, content: systemPrompt },
-      { role: 'user' as const, content: `项目：${title}\n\n${content}` },
-    ]
-
-    const summary = await aiProvider.chat({
-      model: model || this.defaultModel,
-      messages,
-      temperature: 0.3,
-      maxTokens: 500,
-    })
-
-    return { summary }
+      return { summary: result }
+    } catch (error: any) {
+      throw new InternalServerErrorException(`摘要生成失败: ${error.message}`)
+    }
   }
 
-  async chat(dto: ChatDto): Promise<{ response: string; history: Array<{ role: string; content: string }> }> {
-    const { projectId, message, history = [], provider, model, temperature } = dto
+  async textComplete(userId: string, dto: CompleteDto) {
+    const config = await this.aiConfigService.getConfig(userId, AIAction.TEXT_COMPLETION)
+    const providerName = this.toProviderName(dto.provider ?? config?.provider) ?? 'openai'
+    const model = dto.model || config?.model || 'gpt-4'
+    
+    const keyData = await this.getApiKey(userId, providerName)
+    if (!keyData) {
+      throw new InternalServerErrorException('未配置 API Key')
+    }
 
+    const provider = this.getProvider(providerName)
+    provider.setApiKey(keyData.apiKey)
+    if (keyData.baseUrl) {
+      provider.setBaseUrl(keyData.baseUrl)
+    }
+
+    // 获取多阶段风格提示词（这是核心改进）
+    let systemPrompt = ''
+    try {
+      const stylePrompt = await this.styleApplicationService.generateMultiStageStylePrompt(
+        dto.projectId,
+        userId,
+        dto.content
+      )
+      systemPrompt = stylePrompt.fullPrompt
+    } catch (e) {
+      // 如果风格提示失败，回退到简单提示
+      const context = await this.contextBuilderService.buildWritingContext(dto.projectId)
+      systemPrompt = `你是一位专业的小说作家。请根据上下文续写故事，保持文风一致，情节连贯。\n\n${context}`
+    }
+
+    // 追加基础上下文预览信息
+    try {
+      const preview = await this.contextBuilderService.buildContextPreview(
+        dto.projectId,
+        userId,
+        { currentText: dto.content },
+      )
+      const previewText = this.contextBuilderService.formatContextPreviewForPrompt(preview)
+      if (previewText) {
+        systemPrompt += `\n\n# 创作基础上下文\n\n${previewText}`
+      }
+    } catch (previewError) {
+      // 上下文预览增强失败不应影响文本续写
+      console.warn('上下文预览构建失败，使用已有提示词:', previewError)
+    }
+
+    try {
+      const result = await provider.chat({
+        model,
+        messages: [
+          { role: 'system' as const, content: systemPrompt },
+          { role: 'user' as const, content: `【当前需要续写的内容】\n\n${dto.content}` },
+        ],
+        temperature: dto.temperature ?? 0.7,
+        maxTokens: dto.maxTokens,
+      })
+
+      return { completion: result }
+    } catch (error: any) {
+      throw new InternalServerErrorException(`文本续写失败: ${error.message}`)
+    }
+  }
+
+  async *textCompleteStream(userId: string, dto: CompleteDto): AsyncGenerator<string> {
+    const config = await this.aiConfigService.getConfig(userId, AIAction.TEXT_COMPLETION)
+    const providerName = this.toProviderName(dto.provider ?? config?.provider) ?? 'openai'
+    const model = dto.model || config?.model || 'gpt-4'
+
+    const keyData = await this.getApiKey(userId, providerName)
+    if (!keyData) {
+      throw new InternalServerErrorException('未配置 API Key')
+    }
+
+    const provider = this.getProvider(providerName)
+    provider.setApiKey(keyData.apiKey)
+    if (keyData.baseUrl) {
+      provider.setBaseUrl(keyData.baseUrl)
+    }
+
+    let systemPrompt = ''
+    try {
+      const stylePrompt = await this.styleApplicationService.generateMultiStageStylePrompt(
+        dto.projectId,
+        userId,
+        dto.content,
+      )
+      systemPrompt = stylePrompt.fullPrompt
+    } catch (e) {
+      const context = await this.contextBuilderService.buildWritingContext(dto.projectId)
+      systemPrompt = `你是一位专业的小说作家。请根据上下文续写故事，保持文风一致，情节连贯。\n\n${context}`
+    }
+
+    // 追加基础上下文预览信息
+    try {
+      const preview = await this.contextBuilderService.buildContextPreview(
+        dto.projectId,
+        userId,
+        { currentText: dto.content },
+      )
+      const previewText = this.contextBuilderService.formatContextPreviewForPrompt(preview)
+      if (previewText) {
+        systemPrompt += `\n\n# 创作基础上下文\n\n${previewText}`
+      }
+    } catch (previewError) {
+      console.warn('上下文预览构建失败，使用已有提示词:', previewError)
+    }
+
+    yield* provider.chatStream({
+      model,
+      messages: [
+        { role: 'system' as const, content: systemPrompt },
+        { role: 'user' as const, content: `【当前需要续写的内容】\n\n${dto.content}` },
+      ],
+      temperature: dto.temperature ?? 0.7,
+      maxTokens: dto.maxTokens,
+    })
+  }
+
+  private async buildContext(projectId: string): Promise<string> {
     const project = await this.prisma.project.findUnique({
       where: { id: projectId },
+      include: {
+        characters: {
+          take: 10,
+        },
+        chapters: {
+          orderBy: { order: 'desc' },
+          take: 3,
+          include: {
+            contents: {
+              orderBy: { order: 'desc' },
+              take: 1,
+            },
+          },
+        },
+      },
     })
 
     if (!project) {
-      throw new BadRequestException('项目不存在')
+      return ''
     }
 
-    const writingContext = await this.contextBuilder.buildWritingContext(projectId)
-    const aiProvider = this.getProvider(provider)
+    const characterInfo = project.characters
+      .map(c => `人物: ${c.name}${c.role ? ` (${c.role})` : ''}${c.personality ? ` - 性格: ${c.personality}` : ''}`)
+      .join('\n')
 
-    const systemPrompt = `你是一位专业的小说写作助手，服务于项目"${project.title}"。
+    const recentContent = project.chapters
+      .flatMap(ch => ch.contents.map(c => c.content))
+      .join('\n---\n')
 
-项目信息：
-- 副标题：${project.subtitle || '无'}
-- 简介：${project.synopsis || '无'}
-- 类型：${project.genre || '未知'}
-- 标签：${project.tags?.join(', ') || '无'}
+    return `
+项目: ${project.title}
+类型: ${project.genre}
+简介: ${project.synopsis}
 
-${writingContext}
+主要人物:
+${characterInfo || '暂无'}
 
-你可以帮助用户：
-1. 续写故事内容
-2. 讨论人物设定
-3. 完善世界观设定
-4. 提供写作建议
-5. 检查内容一致性
+最近章节内容:
+${recentContent || '暂无'}
+`
+  }
 
-请用中文回答，语气专业且友好。`
+  private getProvider(name: ProviderName): AIProvider {
+    switch (name) {
+      case 'openai':
+        return this.openaiProvider
+      case 'claude':
+        return this.claudeProvider
+      case 'deepseek':
+        return this.deepseekProvider
+      case 'mimo':
+        return this.mimoProvider
+      default:
+        return this.openaiProvider
+    }
+  }
 
-    const messages: Array<{ role: 'system' | 'user' | 'assistant'; content: string }> = [
-      { role: 'system', content: systemPrompt },
-      ...history.map((h) => ({ role: h.role as 'user' | 'assistant', content: h.content })),
-      { role: 'user', content: message },
-    ]
+  private toProviderName(provider?: string | null): ProviderName | undefined {
+    switch (provider) {
+      case 'openai':
+      case 'claude':
+      case 'deepseek':
+      case 'mimo':
+        return provider
+      default:
+        return undefined
+    }
+  }
 
-    const response = await aiProvider.chat({
-      model: model || this.defaultModel,
-      messages,
-      temperature: temperature ?? 0.7,
-      maxTokens: 2000,
-    })
+  private async getApiKey(userId: string, provider: ProviderName): Promise<{ apiKey: string; baseUrl: string | null } | null> {
+    return this.apiKeysService.getActiveKey(userId, provider)
+  }
 
-    const newHistory = [...history, { role: 'user', content: message }, { role: 'assistant', content: response }]
+  private async logUsage(
+    userId: string,
+    projectId: string,
+    endpoint: string,
+    method: string,
+    statusCode: number,
+    requestBody: any,
+    responseBody: any,
+  ) {
+    try {
+      const apiKeys = await this.prisma.apiKey.findMany({
+        where: { userId, isActive: true },
+        take: 1,
+      })
 
-    return { response, history: newHistory }
+      if (apiKeys.length > 0) {
+        await this.usageLogsService.create(projectId, {
+          apiKeyId: apiKeys[0].id,
+          endpoint,
+          method,
+          statusCode,
+          requestBody: requestBody ? JSON.stringify(requestBody) : undefined,
+          responseBody: responseBody ? JSON.stringify(responseBody) : undefined,
+        })
+      }
+    } catch (error) {
+      console.error('记录使用日志失败:', error)
+    }
   }
 }

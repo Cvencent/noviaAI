@@ -86,6 +86,16 @@ export class ChaptersController {
     return this.chaptersService.addContent(user.id, projectId, id, addContentDto)
   }
 
+  @Put(':id/contents')
+  async updateAllContents(
+    @CurrentUser() user: any,
+    @Param('projectId') projectId: string,
+    @Param('id') id: string,
+    @Body() body: { title: string; contents: Array<{ content: string; order: number }> },
+  ) {
+    return this.chaptersService.updateAllContents(user.id, projectId, id, body)
+  }
+
   @Put(':id/contents/:contentId')
   async updateContent(
     @CurrentUser() user: any,

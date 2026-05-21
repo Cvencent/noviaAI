@@ -5,7 +5,7 @@ export interface Project {
   subtitle?: string
   synopsis: string
   genre: string
-  tags: string[]
+  tags: string
   status: string
   wordCount: number
   createdAt: string
@@ -33,7 +33,7 @@ export interface WorldSettingItem {
   worldSettingId: string
   name: string
   description?: string
-  details?: any
+  details?: string
   createdAt: string
   updatedAt: string
 }
@@ -74,7 +74,7 @@ export interface Scene {
   summary?: string
   location?: string
   timePeriod?: string
-  characters: string[]
+  characters: string
   content?: string
   order?: number
   createdAt: string
@@ -139,7 +139,7 @@ export interface CreateProjectDto {
   subtitle?: string
   synopsis: string
   genre: string
-  tags?: string[]
+  tags?: string
   status?: string
   wordCount?: number
 }
@@ -149,7 +149,7 @@ export interface UpdateProjectDto {
   subtitle?: string
   synopsis?: string
   genre?: string
-  tags?: string[]
+  tags?: string
   status?: string
   wordCount?: number
 }

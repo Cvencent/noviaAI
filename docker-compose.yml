@@ -1,0 +1,57 @@
+version: '3.8'
+
+services:
+  # PostgreSQL 数据库
+  db:
+    image: postgres:15-alpine
+    container_name: novel-ai-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${DB_USER:-novel_ai}
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-novel_ai_password}
+      POSTGRES_DB: ${DB_NAME:-novel_ai}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${DB_USER:-novel_ai} -d ${DB_NAME:-novel_ai}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # 后端服务
+  server:
+    build:
+      context: ./server
+      dockerfile: Dockerfile
+    container_name: novel-ai-server
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgresql://${DB_USER:-novel_ai}:${DB_PASSWORD:-novel_ai_password}@db:5432/${DB_NAME:-novel_ai}?schema=public
+      JWT_SECRET: ${JWT_SECRET:-supersecretjwtkeyfornovelai}
+      NODE_ENV: production
+    ports:
+      - "4000:4000"
+    volumes:
+      - ./server/prisma:/app/prisma
+
+  # 前端服务
+  client:
+    build:
+      context: ./client
+      dockerfile: Dockerfile
+    container_name: novel-ai-client
+    restart: unless-stopped
+    depends_on:
+      - server
+    ports:
+      - "3000:80"
+    environment:
+      VITE_API_BASE_URL: http://localhost:3000/api
+
+volumes:
+  postgres_data:

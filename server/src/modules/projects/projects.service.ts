@@ -9,7 +9,13 @@ export class ProjectsService {
   async create(userId: string, createProjectDto: CreateProjectDto) {
     const project = await this.prisma.project.create({
       data: {
-        ...createProjectDto,
+        title: createProjectDto.title,
+        subtitle: createProjectDto.subtitle,
+        synopsis: createProjectDto.synopsis || '',
+        genre: createProjectDto.genre,
+        tags: createProjectDto.tags || '',
+        status: createProjectDto.status,
+        wordCount: createProjectDto.wordCount,
         userId,
       },
     })
@@ -163,7 +169,7 @@ export class ProjectsService {
         subtitle,
         synopsis,
         genre,
-        tags: tags || [],
+        tags: Array.isArray(tags) ? tags.join(',') : (tags || ''),
         status: status || 'IDEATION',
         wordCount: wordCount || 0,
         worldSettings: worldSettings ? {
@@ -175,7 +181,7 @@ export class ProjectsService {
               create: ws.items.map((item: any) => ({
                 name: item.name,
                 description: item.description,
-                details: item.details,
+                details: typeof item.details === 'object' ? JSON.stringify(item.details) : item.details,
               })),
             } : undefined,
           })),
@@ -200,7 +206,7 @@ export class ProjectsService {
             summary: scene.summary,
             location: scene.location,
             timePeriod: scene.timePeriod,
-            characters: scene.characters || [],
+            characters: Array.isArray(scene.characters) ? scene.characters.join(',') : (scene.characters || ''),
             content: scene.content,
             order: scene.order,
           })),

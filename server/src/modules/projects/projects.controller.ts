@@ -1,16 +1,6 @@
-import {
-  Controller,
-  Get,
-  Post,
-  Put,
-  Delete,
-  Body,
-  Param,
-  UseGuards,
-  Res,
-} from '@nestjs/common'
-import { Response } from 'express'
+import { Controller, Get, Post, Put, Delete, Body, Param, Query, UseGuards } from '@nestjs/common'
 import { ProjectsService } from './projects.service'
+import { AiProjectGeneratorService } from './ai-project-generator.service'
 import { CreateProjectDto, UpdateProjectDto } from './dto'
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard'
 import { CurrentUser } from '../auth/decorators/current-user.decorator'
@@ -18,11 +8,29 @@ import { CurrentUser } from '../auth/decorators/current-user.decorator'
 @Controller('projects')
 @UseGuards(JwtAuthGuard)
 export class ProjectsController {
-  constructor(private readonly projectsService: ProjectsService) {}
+  constructor(
+    private readonly projectsService: ProjectsService,
+    private readonly aiProjectGeneratorService: AiProjectGeneratorService,
+  ) {}
 
   @Post()
   async create(@CurrentUser() user: any, @Body() createProjectDto: CreateProjectDto) {
     return this.projectsService.create(user.id, createProjectDto)
+  }
+
+  @Post('ai-generate')
+  async aiGenerate(@CurrentUser() user: any, @Body() body: { description: string }) {
+    return this.aiProjectGeneratorService.generateProject(user.id, body.description)
+  }
+
+  @Post(':id/ai-generate-characters')
+  async aiGenerateCharacters(@CurrentUser() user: any, @Param('id') id: string, @Body() body: { count?: number }) {
+    return this.aiProjectGeneratorService.generateCharacters(user.id, id, body.count)
+  }
+
+  @Post(':id/ai-generate-world-settings')
+  async aiGenerateWorldSettings(@CurrentUser() user: any, @Param('id') id: string, @Body() body: { count?: number }) {
+    return this.aiProjectGeneratorService.generateWorldSettings(user.id, id, body.count)
   }
 
   @Get()
@@ -49,15 +57,9 @@ export class ProjectsController {
     return this.projectsService.remove(user.id, id)
   }
 
-  @Post(':id/export')
-  async exportProject(@CurrentUser() user: any, @Param('id') id: string, @Res() res: Response) {
-    const project = await this.projectsService.exportProject(user.id, id)
-    const jsonData = JSON.stringify(project, null, 2)
-    const filename = `${project.title.replace(/[^a-zA-Z0-9\u4e00-\u9fa5]/g, '_')}_${Date.now()}.json`
-
-    res.setHeader('Content-Type', 'application/json')
-    res.setHeader('Content-Disposition', `attachment; filename="${filename}"`)
-    res.send(jsonData)
+  @Get(':id/export')
+  async exportProject(@CurrentUser() user: any, @Param('id') id: string) {
+    return this.projectsService.exportProject(user.id, id)
   }
 
   @Post('import')

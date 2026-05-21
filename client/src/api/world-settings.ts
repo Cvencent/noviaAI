@@ -1,37 +1,43 @@
-import axios from 'axios'
+import { apiClient } from './client'
 import type {
   WorldSetting,
   CreateWorldSettingDto,
   UpdateWorldSettingDto,
 } from '../types/world-setting'
 
-const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:3000'
+export { WorldSetting, CreateWorldSettingDto, UpdateWorldSettingDto }
 
-const apiClient = axios.create({
-  baseURL: API_BASE_URL,
-  headers: {
-    'Content-Type': 'application/json',
-  },
-})
+export interface WorldConflict {
+  type: string
+  severity: string
+  title: string
+  description: string
+  content: string
+  suggestion: string
+}
 
-apiClient.interceptors.request.use((config) => {
-  const token = localStorage.getItem('accessToken')
-  if (token) {
-    config.headers.Authorization = `Bearer ${token}`
+export interface WorldConflictResult {
+  hasConflict: boolean
+  conflicts: WorldConflict[]
+  context: {
+    relevantSettings: string[]
+    mentionedItems: string[]
   }
-  return config
-})
+}
 
-apiClient.interceptors.response.use(
-  (response) => response,
-  (error) => {
-    if (error.response?.status === 401) {
-      localStorage.removeItem('accessToken')
-      window.location.href = '/login'
-    }
-    return Promise.reject(error)
-  }
-)
+export interface DetectedElement {
+  type: 'character' | 'location' | 'magic' | 'organization' | 'item' | 'concept'
+  name: string
+  description?: string
+  context: string
+  confidence: number
+}
+
+export interface WorldElementAnalysis {
+  newElements: DetectedElement[]
+  existingElements: string[]
+  suggestions: string[]
+}
 
 export const worldSettingsApi = {
   async getAll(projectId: string): Promise<WorldSetting[]> {
@@ -72,5 +78,79 @@ export const worldSettingsApi = {
 
   async delete(projectId: string, id: string): Promise<void> {
     await apiClient.delete(`/projects/${projectId}/world-settings/${id}`)
+  },
+
+  async detectConflicts(
+    projectId: string,
+    content: string,
+    options?: {
+      checkGeography?: boolean
+      checkMagic?: boolean
+      checkPolitics?: boolean
+      checkCulture?: boolean
+      checkSocial?: boolean
+    }
+  ): Promise<WorldConflictResult> {
+    const response = await apiClient.post(`/projects/${projectId}/world-settings/detect-conflicts`, {
+      content,
+      ...options,
+    })
+    return response.data
+  },
+
+  async getContext(projectId: string): Promise<{
+    worldSettings: WorldSetting[]
+    characters: any[]
+    plots: any[]
+  }> {
+    const response = await apiClient.get(`/projects/${projectId}/world-settings/context`)
+    return response.data
+  },
+
+  async getReference(projectId: string, settingId: string): Promise<{
+    id: string
+    name: string
+    category: string
+    reference: string
+  }> {
+    const response = await apiClient.get(`/projects/${projectId}/world-settings/reference/${settingId}`)
+    return response.data
+  },
+
+  async search(projectId: string, query: string): Promise<any[]> {
+    const response = await apiClient.get(`/projects/${projectId}/world-settings/search`, {
+      params: { q: query },
+    })
+    return response.data
+  },
+
+  async extractElements(
+    projectId: string,
+    content: string,
+    existingContent?: string,
+  ): Promise<WorldElementAnalysis> {
+    const response = await apiClient.post(`/projects/${projectId}/world-settings/extract-elements`, {
+      content,
+      existingContent,
+    })
+    return response.data
+  },
+
+  async addElement(
+    projectId: string,
+    element: { type: string; name: string; description?: string },
+  ): Promise<{ id: string; type: string }> {
+    const response = await apiClient.post(`/projects/${projectId}/world-settings/add-element`, element)
+    return response.data
+  },
+
+  async batchAddElements(
+    projectId: string,
+    elements: Array<{ type: string; name: string; description?: string }>,
+  ): Promise<Array<{ element: DetectedElement; result: { id: string; type: string } | null }>> {
+    const response = await apiClient.post(`/projects/${projectId}/world-settings/batch-add-elements`, {
+      elements,
+    })
+    return response.data
   },
 }

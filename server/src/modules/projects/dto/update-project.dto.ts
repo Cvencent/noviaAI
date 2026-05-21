@@ -1,4 +1,4 @@
-import { IsString, IsOptional, IsArray, IsInt, Min } from 'class-validator'
+import { IsString, IsOptional, IsInt, Min } from 'class-validator'
 
 export class UpdateProjectDto {
   @IsString()
@@ -17,10 +17,9 @@ export class UpdateProjectDto {
   @IsOptional()
   genre?: string
 
-  @IsArray()
-  @IsString({ each: true })
+  @IsString()
   @IsOptional()
-  tags?: string[]
+  tags?: string
 
   @IsString()
   @IsOptional()

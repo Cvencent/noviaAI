@@ -1,4 +1,4 @@
-import axios from 'axios'
+import { apiClient } from './client'
 import type {
   Chapter,
   CreateChapterDto,
@@ -11,33 +11,12 @@ import type {
   ChapterSummary,
 } from '../types/chapter'
 
-const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:3000'
+export type { Chapter }
 
-const apiClient = axios.create({
-  baseURL: API_BASE_URL,
-  headers: {
-    'Content-Type': 'application/json',
-  },
-})
-
-apiClient.interceptors.request.use((config) => {
-  const token = localStorage.getItem('accessToken')
-  if (token) {
-    config.headers.Authorization = `Bearer ${token}`
-  }
-  return config
-})
-
-apiClient.interceptors.response.use(
-  (response) => response,
-  (error) => {
-    if (error.response?.status === 401) {
-      localStorage.removeItem('accessToken')
-      window.location.href = '/login'
-    }
-    return Promise.reject(error)
-  }
-)
+export interface UpdateChapterContentDto {
+  title: string
+  contents: Array<{ content: string; order: number }>
+}
 
 export const chaptersApi = {
   async getAll(projectId: string): Promise<Chapter[]> {
@@ -82,6 +61,18 @@ export const chaptersApi = {
   },
 
   async updateContent(
+    projectId: string,
+    chapterId: string,
+    data: UpdateChapterContentDto,
+  ): Promise<Chapter> {
+    const response = await apiClient.put(
+      `/projects/${projectId}/chapters/${chapterId}/contents`,
+      data,
+    )
+    return response.data
+  },
+
+  async updateContentById(
     projectId: string,
     chapterId: string,
     contentId: string,
@@ -129,8 +120,8 @@ export const chaptersApi = {
     return response.data.wordCount
   },
 
-  async getProjectWordCount(projectId: string): Promise<number> {
+  async getProjectWordCount(projectId: string): Promise<{ wordCount: number }> {
     const response = await apiClient.get(`/projects/${projectId}/chapters/stats/total-words`)
-    return response.data.wordCount
+    return response.data
   },
 }

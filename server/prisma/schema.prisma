@@ -3,92 +3,127 @@ generator client {
 }
 
 datasource db {
-  provider = "postgresql"
+  provider = "sqlite"
   url      = env("DATABASE_URL")
 }
 
 model User {
+  id                    String                 @id @default(uuid())
+  email                 String                 @unique
+  password              String
+  name                  String?
+  createdAt             DateTime               @default(now())
+  updatedAt             DateTime               @updatedAt
+  projects              Project[]
+  apiKeys               ApiKey[]
+  aiConfigs             AIConfig[]
+  consistencyCheckRules ConsistencyCheckRule[]
+  customWritingStyles   CustomWritingStyle[]
+  writingStyleFusions   WritingStyleFusion[]
+  writingStyleHistory   WritingStyleHistory[]
+}
+
+model AIConfig {
   id        String   @id @default(uuid())
-  email     String   @unique
-  password  String
-  name      String?
+  userId    String
+  action    String
+  provider  String
+  model     String?
+  apiKeyId  String?
+  isActive  Boolean  @default(true)
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
-  projects  Project[]
-  apiKeys   ApiKey[]
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  apiKey    ApiKey?  @relation(fields: [apiKeyId], references: [id], onDelete: SetNull)
+
+  @@unique([userId, action])
 }
 
 model Project {
-  id        String   @id @default(uuid())
-  userId    String
-  title     String
-  subtitle  String?
-  synopsis  String
-  genre     String
-  tags      String[]
-  status    String   @default("IDEATION")
-  wordCount Int      @default(0)
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-  user           User                @relation(fields: [userId], references: [id], onDelete: Cascade)
-  worldSettings  WorldSetting[]
-  characters     Character[]
-  scenes         Scene[]
-  plots          Plot[]
-  chapters       Chapter[]
+  id                      String                   @id @default(uuid())
+  userId                  String
+  title                   String
+  subtitle                String?
+  synopsis                String
+  genre                   String
+  tags                    String
+  status                  String                   @default("IDEATION")
+  wordCount               Int                      @default(0)
+  createdAt               DateTime                 @default(now())
+  updatedAt               DateTime                 @updatedAt
+  user                    User                     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  worldSettings           WorldSetting[]
+  characters              Character[]
+  scenes                  Scene[]
+  plots                   Plot[]
+  chapters                Chapter[]
+  consistencyCheckReports ConsistencyCheckReport[]
+  writingStyleHistory     WritingStyleHistory[]
+  loreEntries             LoreEntry[]
+  chekhovsGuns            ChekhovsGun[]
+  outlines                Outline[]
+  turningPoints           TurningPoint[]
+  timelineEvents          TimelineEvent[]
+  
+  // 写作风格配置
+  currentWritingStyleId   String?
+  writingStyleConfig      String?
 }
 
 model WorldSetting {
-  id        String   @id @default(uuid())
-  projectId String
-  category  String
-  name      String
+  id          String             @id @default(uuid())
+  projectId   String
+  category    String
+  name        String
   description String?
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-  project   Project           @relation(fields: [projectId], references: [id], onDelete: Cascade)
-  items     WorldSettingItem[]
+  createdAt   DateTime           @default(now())
+  updatedAt   DateTime           @updatedAt
+  project     Project            @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  items       WorldSettingItem[]
+
+  @@unique([projectId, category, name])
 }
 
 model WorldSettingItem {
-  id              String      @id @default(uuid())
-  worldSettingId  String
-  name            String
-  description     String?
-  details         Json?
-  createdAt       DateTime    @default(now())
-  updatedAt       DateTime    @updatedAt
-  worldSetting    WorldSetting @relation(fields: [worldSettingId], references: [id], onDelete: Cascade)
+  id             String       @id @default(uuid())
+  worldSettingId String
+  name           String
+  description    String?
+  details        String?
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
+  worldSetting   WorldSetting @relation(fields: [worldSettingId], references: [id], onDelete: Cascade)
 }
 
 model Character {
-  id          String   @id @default(uuid())
-  projectId   String
-  name        String
-  role        String?
-  appearance  String?
-  personality String?
-  background  String?
-  goals       String?
-  flaws       String?
-  arc         String?
-  voice       String?
-  notes       String?
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
-  project     Project                 @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  id                String                  @id @default(uuid())
+  projectId         String
+  name              String
+  role              String?
+  appearance        String?
+  personality       String?
+  background        String?
+  goals             String?
+  flaws             String?
+  arc               String?
+  voice             String?
+  notes             String?
+  createdAt         DateTime                @default(now())
+  updatedAt         DateTime                @updatedAt
+  project           Project                 @relation(fields: [projectId], references: [id], onDelete: Cascade)
   relationshipsFrom CharacterRelationship[] @relation("CharacterFrom")
   relationshipsTo   CharacterRelationship[] @relation("CharacterTo")
+  appearances       CharacterAppearance[]
 }
 
 model CharacterRelationship {
-  id           String   @id @default(uuid())
-  fromId       String
-  toId         String
-  relationship String
-  description  String?
-  createdAt    DateTime @default(now())
-  updatedAt    DateTime @updatedAt
+  id            String    @id @default(uuid())
+  fromId        String
+  toId          String
+  relationship  String
+  description   String?
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
   fromCharacter Character @relation("CharacterFrom", fields: [fromId], references: [id], onDelete: Cascade)
   toCharacter   Character @relation("CharacterTo", fields: [toId], references: [id], onDelete: Cascade)
 }
@@ -100,7 +135,7 @@ model Scene {
   summary     String?
   location    String?
   timePeriod  String?
-  characters  String[]
+  characters  String
   content     String?
   order       Int?
   createdAt   DateTime @default(now())
@@ -109,48 +144,51 @@ model Scene {
 }
 
 model Plot {
-  id          String   @id @default(uuid())
+  id          String      @id @default(uuid())
   projectId   String
   title       String
   description String?
-  status      String   @default("ACTIVE")
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
+  status      String      @default("ACTIVE")
+  createdAt   DateTime    @default(now())
+  updatedAt   DateTime    @updatedAt
   project     Project     @relation(fields: [projectId], references: [id], onDelete: Cascade)
   plotPoints  PlotPoint[]
 }
 
 model PlotPoint {
-  id        String   @id @default(uuid())
-  plotId    String
-  title     String
-  type      String
+  id          String   @id @default(uuid())
+  plotId      String
+  title       String
+  type        String
   description String?
-  order     Int
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-  plot      Plot     @relation(fields: [plotId], references: [id], onDelete: Cascade)
+  order       Int
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  plot        Plot     @relation(fields: [plotId], references: [id], onDelete: Cascade)
 }
 
 model Chapter {
-  id        String   @id @default(uuid())
+  id        String           @id @default(uuid())
   projectId String
   title     String
   order     Int
-  status    String   @default("DRAFT")
-  wordCount Int      @default(0)
+  status    String           @default("DRAFT")
+  wordCount Int              @default(0)
   summary   String?
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  createdAt DateTime         @default(now())
+  updatedAt DateTime         @updatedAt
   project   Project          @relation(fields: [projectId], references: [id], onDelete: Cascade)
   contents  ChapterContent[]
   summaries ChapterSummary[]
+  loreUsages LoreUsage[]
+  setupGuns  ChekhovsGun[]  @relation("SetupChapter")
+  payoffGuns ChekhovsGun[]  @relation("PayoffChapter")
 }
 
 model ChapterContent {
   id        String   @id @default(uuid())
   chapterId String
-  content   String   @db.Text
+  content   String
   order     Int
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -160,38 +198,297 @@ model ChapterContent {
 model ChapterSummary {
   id        String   @id @default(uuid())
   chapterId String
-  summary   String   @db.Text
+  summary   String
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
   chapter   Chapter  @relation(fields: [chapterId], references: [id], onDelete: Cascade)
 }
 
+model ConsistencyCheckRule {
+  id          String   @id @default(uuid())
+  userId      String
+  category    String
+  name        String
+  description String?
+  isEnabled   Boolean  @default(true)
+  severity    String   @default("NORMAL")
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+}
+
+model ConsistencyCheckReport {
+  id            String   @id @default(uuid())
+  projectId     String
+  chapterId     String?
+  content       String
+  reportData    String
+  totalIssues   Int      @default(0)
+  criticalCount Int      @default(0)
+  normalCount   Int      @default(0)
+  minorCount    Int      @default(0)
+  isReviewed    Boolean  @default(false)
+  reviewedAt    DateTime?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+  project       Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  @@index([projectId])
+  @@index([chapterId])
+}
+
+model CharacterAppearance {
+  id          String   @id @default(uuid())
+  characterId String
+  chapterId   String?
+  description String
+  details     String?
+  context     String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  character   Character @relation(fields: [characterId], references: [id], onDelete: Cascade)
+
+  @@index([characterId])
+  @@index([chapterId])
+}
+
 model ApiKey {
-  id           String   @id @default(uuid())
+  id           String     @id @default(uuid())
   userId       String
   provider     String
   name         String
   encryptedKey String
-  isActive     Boolean  @default(true)
+  baseUrl      String?    // 自定义 API 端点地址
+  isActive     Boolean    @default(true)
   expiresAt    DateTime?
-  createdAt    DateTime @default(now())
-  updatedAt    DateTime @updatedAt
-  user         User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+  createdAt    DateTime   @default(now())
+  updatedAt    DateTime   @updatedAt
+  user         User       @relation(fields: [userId], references: [id], onDelete: Cascade)
   usageLogs    UsageLog[]
+  aiConfigs    AIConfig[]
 }
 
 model UsageLog {
+  id           String   @id @default(uuid())
+  apiKeyId     String
+  endpoint     String
+  method       String
+  statusCode   Int?
+  requestBody  String?
+  responseBody String?
+  tokensUsed   Int?
+  cost         Float?
+  ipAddress    String?
+  userAgent    String?
+  createdAt    DateTime @default(now())
+  apiKey       ApiKey   @relation(fields: [apiKeyId], references: [id], onDelete: Cascade)
+}
+
+model CustomWritingStyle {
   id          String   @id @default(uuid())
-  apiKeyId    String
-  endpoint    String
-  method      String
-  statusCode  Int?
-  requestBody Json?
-  responseBody Json?
-  tokensUsed  Int?
-  cost        Float?
-  ipAddress   String?
-  userAgent   String?
+  userId      String
+  name        String
+  description String?
+  icon        String?
+  config      String
+  sourceType  String
+  sourceData  String?
+  isPublic    Boolean  @default(false)
+  useCount    Int      @default(0)
   createdAt   DateTime @default(now())
-  apiKey      ApiKey   @relation(fields: [apiKeyId], references: [id], onDelete: Cascade)
+  updatedAt   DateTime @updatedAt
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  history     WritingStyleHistory[]
+
+  @@index([userId])
+}
+
+model WritingStyleFusion {
+  id          String   @id @default(uuid())
+  userId      String
+  name        String
+  description String?
+  styles      String
+  resultConfig String
+  compatibilityAnalysis String?
+  createdAt   DateTime @default(now())
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+}
+
+model WritingStyleHistory {
+  id          String   @id @default(uuid())
+  userId      String
+  projectId   String?
+  styleId     String?
+  action      String
+  details     String?
+  createdAt   DateTime @default(now())
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  project     Project? @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  style       CustomWritingStyle? @relation(fields: [styleId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([projectId])
+  @@index([styleId])
+}
+
+// ==================== Lorebook/设定簿系统 ====================
+model LoreEntry {
+  id          String        @id @default(uuid())
+  projectId   String
+  name        String
+  category    String        // CHARACTER, LOCATION, ITEM, MAGIC, RACE, ORGANIZATION, OTHER
+  description String
+  content     String?       // 详细内容，可以是Markdown
+  keywords    String        // 逗号分隔的触发关键词
+  priority    Int           @default(50) // 优先级，越高越先匹配
+  isActive    Boolean       @default(true)
+  order       Int           @default(0)
+  
+  // 条件触发
+  triggerCondition String? // 触发条件（可选）
+  relatedCharacterIds String? // 关联角色ID（逗号分隔）
+  relatedLocationIds String? // 关联地点ID（逗号分隔）
+  
+  createdAt   DateTime      @default(now())
+  updatedAt   DateTime      @updatedAt
+  project     Project       @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  usages      LoreUsage[]
+  
+  @@index([projectId])
+  @@index([projectId, category])
+  @@index([projectId, isActive])
+}
+
+model LoreUsage {
+  id          String      @id @default(uuid())
+  loreEntryId String
+  chapterId   String?
+  content     String
+  context     String?
+  createdAt   DateTime    @default(now())
+  loreEntry   LoreEntry   @relation(fields: [loreEntryId], references: [id], onDelete: Cascade)
+  chapter     Chapter?    @relation(fields: [chapterId], references: [id], onDelete: Cascade)
+  
+  @@index([loreEntryId])
+  @@index([chapterId])
+}
+
+// ==================== 伏笔/Chekhov's Gun系统 ====================
+model ChekhovsGun {
+  id          String        @id @default(uuid())
+  projectId   String
+  name        String
+  description String
+  setupText   String        // 埋设伏笔的原文
+  setupChapterId String?    // 埋设伏笔的章节
+  setupPosition Int?        // 在章节中的位置
+  
+  // 状态
+  status      String        @default("SETUP") // SETUP, REMINDER, PAYOFF, ABANDONED
+  payoffText  String?       // 回收伏笔的原文
+  payoffChapterId String?   // 回收伏笔的章节
+  
+  // 元数据
+  importance  String        @default("NORMAL") // MINOR, NORMAL, MAJOR, CRITICAL
+  tags        String?       // 逗号分隔的标签
+  notes       String?       // 作者备注
+  
+  createdAt   DateTime      @default(now())
+  updatedAt   DateTime      @updatedAt
+  project     Project       @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  setupChapter Chapter?     @relation("SetupChapter", fields: [setupChapterId], references: [id], onDelete: Cascade)
+  payoffChapter Chapter?    @relation("PayoffChapter", fields: [payoffChapterId], references: [id], onDelete: Cascade)
+  
+  @@index([projectId])
+  @@index([projectId, status])
+  @@index([setupChapterId])
+  @@index([payoffChapterId])
+}
+
+// ==================== 大纲系统 ====================
+model Outline {
+  id            String        @id @default(uuid())
+  projectId     String
+  title         String
+  description   String?
+  structureType String        @default("FULL_BOOK") // FULL_BOOK, VOLUME, ARC
+  status        String        @default("DRAFT")      // DRAFT, IN_PROGRESS, COMPLETED
+  order         Int           @default(0)
+  createdAt     DateTime      @default(now())
+  updatedAt     DateTime      @updatedAt
+  project       Project       @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  items         OutlineItem[]
+
+  @@index([projectId])
+}
+
+model OutlineItem {
+  id            String       @id @default(uuid())
+  outlineId     String
+  chapterId     String?
+  parentId      String?
+  title         String
+  summary       String?
+  goal          String?
+  conflict      String?
+  outcome       String?
+  povCharacter  String?
+  location      String?
+  estimatedWords Int?
+  order         Int          @default(0)
+  createdAt     DateTime     @default(now())
+  updatedAt     DateTime     @updatedAt
+  outline       Outline      @relation(fields: [outlineId], references: [id], onDelete: Cascade)
+  parent        OutlineItem? @relation("OutlineItemTree", fields: [parentId], references: [id], onDelete: Cascade)
+  children      OutlineItem[] @relation("OutlineItemTree")
+
+  @@index([outlineId])
+  @@index([parentId])
+  @@index([chapterId])
+}
+
+// ==================== 转折点系统 ====================
+model TurningPoint {
+  id              String   @id @default(uuid())
+  projectId       String
+  chapterId       String?
+  title           String
+  type            String   @default("PLOT_TURN") // PLOT_TURN, CHARACTER_REVEAL, REVERSAL, CRISIS, CLIMAX, RESOLUTION
+  description     String?
+  impact          String?
+  emotionalShift  String?
+  position        String?  // 故事中的位置描述
+  order           Int      @default(0)
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+  project         Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  @@index([projectId])
+  @@index([chapterId])
+}
+
+// ==================== 时间线系统 ====================
+model TimelineEvent {
+  id          String   @id @default(uuid())
+  projectId   String
+  chapterId   String?
+  title       String
+  eventDate   String?  // 故事内日期（可以是模糊的）
+  timeLabel   String?  // 时间标签，如"黎明"、"三天后"
+  description String?
+  location    String?
+  characters  String?  // 关联角色（逗号分隔）
+  importance  String   @default("NORMAL") // MINOR, NORMAL, MAJOR, CRITICAL
+  order       Int      @default(0)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  project     Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  @@index([projectId])
+  @@index([chapterId])
 }

@@ -2,14 +2,16 @@ import { Injectable, NotFoundException, ConflictException } from '@nestjs/common
 import { PrismaService } from '../../prisma/prisma.service'
 
 export interface CreateApiKeyDto {
-  provider: 'openai' | 'claude'
+  provider: 'openai' | 'claude' | 'deepseek' | 'mimo'
   name: string
   apiKey: string
+  baseUrl?: string
 }
 
 export interface UpdateApiKeyDto {
   name?: string
   apiKey?: string
+  baseUrl?: string
   isActive?: boolean
 }
 
@@ -30,14 +32,13 @@ export class ApiKeysService {
       throw new ConflictException(`已存在活跃的${dto.provider} API Key，请先禁用或删除`)
     }
 
-    const hashedKey = await this.hashApiKey(dto.apiKey)
-
     const apiKey = await this.prisma.apiKey.create({
       data: {
         userId,
         provider: dto.provider,
         name: dto.name,
-        encryptedKey: hashedKey,
+        encryptedKey: dto.apiKey,
+        baseUrl: dto.baseUrl || null,
         isActive: true,
       },
     })
@@ -46,6 +47,7 @@ export class ApiKeysService {
       id: apiKey.id,
       provider: apiKey.provider,
       name: apiKey.name,
+      baseUrl: apiKey.baseUrl,
       isActive: apiKey.isActive,
       createdAt: apiKey.createdAt,
     }
@@ -61,6 +63,7 @@ export class ApiKeysService {
       id: key.id,
       provider: key.provider,
       name: key.name,
+      baseUrl: key.baseUrl,
       isActive: key.isActive,
       createdAt: key.createdAt,
       updatedAt: key.updatedAt,
@@ -84,6 +87,7 @@ export class ApiKeysService {
       id: apiKey.id,
       provider: apiKey.provider,
       name: apiKey.name,
+      baseUrl: apiKey.baseUrl,
       isActive: apiKey.isActive,
       createdAt: apiKey.createdAt,
       updatedAt: apiKey.updatedAt,
@@ -105,9 +109,10 @@ export class ApiKeysService {
 
     const updateData: any = {}
     if (dto.name) updateData.name = dto.name
+    if (dto.baseUrl !== undefined) updateData.baseUrl = dto.baseUrl || null
     if (dto.isActive !== undefined) updateData.isActive = dto.isActive
     if (dto.apiKey) {
-      updateData.encryptedKey = await this.hashApiKey(dto.apiKey)
+      updateData.encryptedKey = dto.apiKey
     }
 
     const updated = await this.prisma.apiKey.update({
@@ -119,6 +124,7 @@ export class ApiKeysService {
       id: updated.id,
       provider: updated.provider,
       name: updated.name,
+      baseUrl: updated.baseUrl,
       isActive: updated.isActive,
       createdAt: updated.createdAt,
       updatedAt: updated.updatedAt,
@@ -145,7 +151,7 @@ export class ApiKeysService {
     return { message: 'API Key已删除' }
   }
 
-  async getActiveKey(userId: string, provider: 'openai' | 'claude'): Promise<string | null> {
+  async getActiveKey(userId: string, provider: 'openai' | 'claude' | 'deepseek' | 'mimo'): Promise<{ apiKey: string; baseUrl: string | null } | null> {
     const apiKey = await this.prisma.apiKey.findFirst({
       where: {
         userId,
@@ -154,11 +160,14 @@ export class ApiKeysService {
       },
     })
 
-    return apiKey?.encryptedKey || null
+    if (!apiKey) {
+      return null
+    }
+
+    return {
+      apiKey: apiKey.encryptedKey,
+      baseUrl: apiKey.baseUrl,
+    }
   }
 
-  private async hashApiKey(apiKey: string): Promise<string> {
-    const crypto = require('crypto')
-    return crypto.createHash('sha256').update(apiKey).digest('hex')
-  }
 }

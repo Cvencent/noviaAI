@@ -1,4 +1,5 @@
 import { IsString, IsOptional, IsEnum, IsArray } from 'class-validator'
+import { AIAction } from '../../ai-config/dto/create-ai-config.dto'
 
 export class ChatDto {
   @IsString()
@@ -9,11 +10,11 @@ export class ChatDto {
 
   @IsOptional()
   @IsArray()
-  history?: Array<{ role: string; content: string }>
+  history?: Array<{ role: 'system' | 'user' | 'assistant'; content: string }>
 
   @IsOptional()
-  @IsEnum(['openai', 'claude'])
-  provider?: 'openai' | 'claude'
+  @IsEnum(['openai', 'claude', 'deepseek', 'mimo'])
+  provider?: 'openai' | 'claude' | 'deepseek' | 'mimo'
 
   @IsOptional()
   @IsString()
@@ -21,4 +22,8 @@ export class ChatDto {
 
   @IsOptional()
   temperature?: number
+
+  @IsOptional()
+  @IsEnum(AIAction)
+  action?: AIAction
 }
