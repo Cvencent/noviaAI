@@ -1272,6 +1272,33 @@ describe('StorySystemService', () => {
     expect(result.results[0].score).toBeGreaterThan(0)
   })
 
+  it('searches structured story graph records when vector indexes are empty', async () => {
+    mockProjectGraph()
+    openaiProvider.embed.mockRejectedValue(new Error('embeddings unavailable'))
+    prisma.storyVectorIndex.findMany.mockResolvedValue([])
+    prisma.storyEntity.findMany.mockResolvedValue([
+      { id: 'entity-1', name: 'Memory Chip', type: 'ITEM', aliases: 'chip, shard', payload: JSON.stringify({ role: 'clue' }) },
+    ])
+    prisma.worldStateFact.findMany.mockResolvedValue([
+      { id: 'fact-1', key: 'chip-rule', category: 'ITEM', value: 'memory chip crack reveals tampering', source: 'chapter-1', commitId: 'commit-1' },
+    ])
+    prisma.openLoop.findMany.mockResolvedValue([
+      { id: 'loop-1', key: 'chip-crack', title: 'chip crack remains unresolved', status: 'OPEN', payload: '{}' },
+    ])
+    prisma.chapterCommit.findMany.mockResolvedValue([
+      { id: 'commit-1', chapterId: 'chapter-1', status: 'ACCEPTED', summaryText: 'Lin studies the chip crack clue.', contentSnapshot: 'The cracked chip glows.' },
+    ])
+
+    const result = await service.searchStoryGraph('user-1', 'project-1', 'chip crack')
+
+    expect(result.results.map((item) => item.sourceType)).toEqual(expect.arrayContaining([
+      'STORY_ENTITY',
+      'WORLD_FACT',
+      'OPEN_LOOP',
+      'CHAPTER_COMMIT',
+    ]))
+  })
+
   it('answers story graph questions with ranked evidence and related memory', async () => {
     mockProjectGraph()
     openaiProvider.embed.mockResolvedValue([1, 0])

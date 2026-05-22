@@ -1361,11 +1361,7 @@ ${overrideTrace.map((trace) => `- ${trace.chapterId}: ${trace.reason}`).join('\n
     if (!normalizedQuery) {
       return { projectId, query: normalizedQuery, results: [] }
     }
-    const items = await (this.prisma.storyVectorIndex?.findMany?.({
-      where: { projectId },
-      orderBy: { updatedAt: 'desc' },
-      take: 200,
-    }) ?? Promise.resolve([]))
+    const items = await this.loadStoryGraphSearchItems(projectId)
     let results
     try {
       const queryEmbedding = await this.openaiProvider.embed(normalizedQuery, 'text-embedding-3-small')
@@ -1373,15 +1369,20 @@ ${overrideTrace.map((trace) => `- ${trace.chapterId}: ${trace.reason}`).join('\n
         throw new Error('Empty story graph query embedding')
       }
       results = items
-        .map((item: any) => ({
-          id: item.id,
-          sourceType: item.sourceType,
-          sourceId: item.sourceId,
-          text: item.text,
-          metadata: this.parseJson(item.metadata, {}),
-          score: this.cosineSimilarity(queryEmbedding, this.parseJson(item.embeddingJson, [])),
-        }))
-        .filter((item) => item.score > 0 || item.text.includes(normalizedQuery))
+        .map((item: any) => {
+          const metadata = this.parseJson(item.metadata, {})
+          const keywordScore = this.keywordScore(normalizedQuery, `${item.text} ${JSON.stringify(metadata)}`)
+          const vectorScore = this.cosineSimilarity(queryEmbedding, this.parseJson(item.embeddingJson, []))
+          return {
+            id: item.id,
+            sourceType: item.sourceType,
+            sourceId: item.sourceId,
+            text: item.text,
+            metadata,
+            score: vectorScore || keywordScore / 100,
+          }
+        })
+        .filter((item) => item.score > 0)
         .sort((a, b) => b.score - a.score)
         .slice(0, 20)
     } catch {
@@ -1753,6 +1754,81 @@ ${this.chapterText(chapter)}`
     } catch {
       // Vector indexing should not block accepted commit projection.
     }
+  }
+
+  private async loadStoryGraphSearchItems(projectId: string) {
+    const [vectorItems, entities, worldFacts, openLoops, commits] = await Promise.all([
+      this.prisma.storyVectorIndex?.findMany?.({
+        where: { projectId },
+        orderBy: { updatedAt: 'desc' },
+        take: 200,
+      }) ?? Promise.resolve([]),
+      this.prisma.storyEntity?.findMany?.({
+        where: { projectId },
+        orderBy: { updatedAt: 'desc' },
+        take: 100,
+      }) ?? Promise.resolve([]),
+      this.prisma.worldStateFact?.findMany?.({
+        where: { projectId },
+        orderBy: { createdAt: 'desc' },
+        take: 100,
+      }) ?? Promise.resolve([]),
+      this.prisma.openLoop?.findMany?.({
+        where: { projectId },
+        orderBy: { updatedAt: 'desc' },
+        take: 100,
+      }) ?? Promise.resolve([]),
+      this.prisma.chapterCommit?.findMany?.({
+        where: { projectId, status: 'ACCEPTED' },
+        orderBy: { createdAt: 'desc' },
+        take: 100,
+      }) ?? Promise.resolve([]),
+    ])
+    const items = [...vectorItems]
+    const seen = new Set(items.map((item: any) => `${item.sourceType}:${item.sourceId}`))
+    const addItem = (item: any) => {
+      const key = `${item.sourceType}:${item.sourceId}`
+      if (seen.has(key)) return
+      seen.add(key)
+      items.push({
+        id: key,
+        embeddingJson: '[]',
+        ...item,
+      })
+    }
+    for (const entity of entities) {
+      addItem({
+        sourceType: 'STORY_ENTITY',
+        sourceId: entity.id,
+        text: [entity.name, entity.type, entity.aliases, entity.payload].filter(Boolean).join(' '),
+        metadata: JSON.stringify({ name: entity.name, type: entity.type }),
+      })
+    }
+    for (const fact of worldFacts) {
+      addItem({
+        sourceType: 'WORLD_FACT',
+        sourceId: fact.id,
+        text: [fact.key, fact.category, fact.value, fact.source].filter(Boolean).join(' '),
+        metadata: JSON.stringify({ key: fact.key, category: fact.category, commitId: fact.commitId }),
+      })
+    }
+    for (const loop of openLoops) {
+      addItem({
+        sourceType: 'OPEN_LOOP',
+        sourceId: loop.id,
+        text: [loop.key, loop.title, loop.status, loop.payload].filter(Boolean).join(' '),
+        metadata: JSON.stringify({ key: loop.key, title: loop.title, status: loop.status }),
+      })
+    }
+    for (const commit of commits) {
+      addItem({
+        sourceType: 'CHAPTER_COMMIT',
+        sourceId: commit.id,
+        text: this.normalizeText(commit.summaryText || this.buildFallbackSummary(commit.contentSnapshot)),
+        metadata: JSON.stringify({ chapterId: commit.chapterId }),
+      })
+    }
+    return items.filter((item: any) => this.normalizeText(item.text))
   }
 
   private cosineSimilarity(left: number[], right: number[]) {
