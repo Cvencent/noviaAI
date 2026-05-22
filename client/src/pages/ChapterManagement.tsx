@@ -19,7 +19,7 @@ import { Card } from '../components/ui/Card'
 import { Input } from '../components/ui/Input'
 import { Modal } from '../components/ui/Modal'
 import { chaptersApi, Chapter } from '../api/chapters'
-import { FullBookAiReview, FullBookReview, PublishingAssets, storySystemApi } from '../api/story-system'
+import { FullBookAiReview, FullBookReview, PublishChecklist, PublishingAssets, storySystemApi } from '../api/story-system'
 
 const STATUS_CONFIG = {
   draft: { label: '草稿', icon: Clock, color: 'text-yellow-600 bg-yellow-50' },
@@ -43,6 +43,7 @@ export function ChapterManagement() {
   const [draggedIndex, setDraggedIndex] = useState<number | null>(null)
   const [fullBookReview, setFullBookReview] = useState<FullBookReview | null>(null)
   const [fullBookAiReview, setFullBookAiReview] = useState<FullBookAiReview | null>(null)
+  const [publishChecklist, setPublishChecklist] = useState<PublishChecklist | null>(null)
   const [publishingAssets, setPublishingAssets] = useState<PublishingAssets | null>(null)
   const [isStoryActionBusy, setIsStoryActionBusy] = useState(false)
 
@@ -177,6 +178,18 @@ export function ChapterManagement() {
     }
   }
 
+  const handlePublishChecklist = async () => {
+    if (!projectId) return
+    setIsStoryActionBusy(true)
+    try {
+      setPublishChecklist(await storySystemApi.getPublishChecklist(projectId))
+    } catch (error) {
+      console.error('发布前检查失败:', error)
+    } finally {
+      setIsStoryActionBusy(false)
+    }
+  }
+
   const downloadExport = (exported: { content?: string; contentBase64?: string; mimeType?: string; fileName: string }) => {
     const payload = exported.contentBase64
       ? Uint8Array.from(atob(exported.contentBase64), (char) => char.charCodeAt(0))
@@ -260,6 +273,10 @@ export function ChapterManagement() {
               <Sparkles className="w-4 h-4 mr-2" />
               AI 审查
             </Button>
+            <Button variant="outline" onClick={handlePublishChecklist} isLoading={isStoryActionBusy}>
+              <ShieldCheck className="w-4 h-4 mr-2" />
+              发布检查
+            </Button>
             <Button variant="outline" onClick={() => handleExportBook('MARKDOWN')} isLoading={isStoryActionBusy}>
               <Download className="w-4 h-4 mr-2" />
               导出 Markdown
@@ -339,6 +356,34 @@ export function ChapterManagement() {
                 ))}
               </div>
             )}
+          </div>
+        )}
+
+        {publishChecklist && (
+          <div className="mb-6 rounded-lg border border-gray-200 bg-white p-4">
+            <div className="flex items-center justify-between gap-4">
+              <div>
+                <div className="text-sm font-medium text-gray-900">发布前检查 · {publishChecklist.status}</div>
+                <div className="mt-1 text-xs text-gray-500">{publishChecklist.checks.length} 项检查</div>
+              </div>
+              <Button variant="ghost" size="sm" onClick={() => setPublishChecklist(null)}>
+                收起
+              </Button>
+            </div>
+            <div className="mt-3 grid gap-2 md:grid-cols-2">
+              {publishChecklist.checks.map((check) => (
+                <div key={check.key} className="rounded border border-gray-100 bg-gray-50 p-3 text-xs">
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="font-medium text-gray-800">{check.label}</span>
+                    <span className={check.status === 'PASS' ? 'text-green-700' : check.status === 'BLOCKED' ? 'text-red-700' : 'text-yellow-700'}>
+                      {check.status}
+                    </span>
+                  </div>
+                  <div className="mt-1 text-gray-700">{check.message}</div>
+                  <div className="mt-1 text-gray-500">{check.action}</div>
+                </div>
+              ))}
+            </div>
           </div>
         )}
 
