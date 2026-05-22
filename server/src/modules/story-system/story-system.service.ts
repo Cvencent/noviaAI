@@ -4,6 +4,8 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common'
+import JSZip = require('jszip')
+import PDFDocument = require('pdfkit')
 import { PrismaService } from '../../prisma/prisma.service'
 import { AiService } from '../ai/ai.service'
 import { AIAction } from '../ai-config/dto/create-ai-config.dto'
@@ -842,11 +844,11 @@ ${dto.content}`
 
   async exportBook(userId: string, projectId: string, dto: ExportBookDto = {}) {
     const format = (dto.format || 'MARKDOWN').toUpperCase()
-    if (format !== 'MARKDOWN') {
-      throw new BadRequestException('当前仅支持 Markdown 导出')
+    if (!['MARKDOWN', 'EPUB', 'PDF'].includes(format)) {
+      throw new BadRequestException('当前仅支持 Markdown、EPUB、PDF 导出')
     }
     const project = await this.loadProject(userId, projectId)
-    const [chapters, commits] = await Promise.all([
+    const [chapters, commits, publishingAsset] = await Promise.all([
       this.prisma.chapter.findMany({
         where: { projectId },
         include: { contents: { orderBy: { order: 'asc' } } },
@@ -856,6 +858,10 @@ ${dto.content}`
         where: { projectId, status: 'ACCEPTED' },
         orderBy: { createdAt: 'desc' },
       }),
+      this.prisma.publishingAsset?.findFirst?.({
+        where: { projectId },
+        orderBy: { updatedAt: 'desc' },
+      }) ?? Promise.resolve(null),
     ])
     const latestAcceptedByChapter = new Map<string, any>()
     for (const commit of commits.filter((item: any) => item.status === 'ACCEPTED')) {
@@ -863,21 +869,52 @@ ${dto.content}`
         latestAcceptedByChapter.set(commit.chapterId, commit)
       }
     }
+    const exportChapters = chapters.map((chapter: any) => {
+      const acceptedCommit = latestAcceptedByChapter.get(chapter.id)
+      return {
+        id: chapter.id,
+        order: chapter.order,
+        title: chapter.title,
+        body: acceptedCommit ? acceptedCommit.contentSnapshot : this.chapterText(chapter),
+        hasAcceptedCommit: Boolean(acceptedCommit),
+      }
+    })
 
     const parts = [`# ${project.title}`, '']
     if (project.synopsis) {
       parts.push(this.markdownText(project.synopsis), '')
     }
-    for (const chapter of chapters) {
-      const acceptedCommit = latestAcceptedByChapter.get(chapter.id)
-      const body = acceptedCommit
-        ? acceptedCommit.contentSnapshot
-        : this.chapterText(chapter)
+    for (const chapter of exportChapters) {
       parts.push(`## 第 ${chapter.order + 1} 章 ${chapter.title}`, '')
-      if (!acceptedCommit) {
+      if (!chapter.hasAcceptedCommit) {
         parts.push('> 未找到 accepted commit，导出当前草稿。', '')
       }
-      parts.push(this.markdownText(body), '')
+      parts.push(this.markdownText(chapter.body), '')
+    }
+    const markdown = parts.join('\n').trimEnd() + '\n'
+
+    if (format === 'EPUB') {
+      const epub = await this.buildEpub(project, exportChapters, publishingAsset, markdown)
+      return {
+        projectId,
+        format,
+        mimeType: 'application/epub+zip',
+        fileName: `${this.safeFileName(project.title)}.epub`,
+        contentBase64: epub.toString('base64'),
+        warnings: this.exportWarnings(exportChapters),
+      }
+    }
+
+    if (format === 'PDF') {
+      const pdf = await this.buildPdf(project, exportChapters, publishingAsset)
+      return {
+        projectId,
+        format,
+        mimeType: 'application/pdf',
+        fileName: `${this.safeFileName(project.title)}.pdf`,
+        contentBase64: pdf.toString('base64'),
+        warnings: this.exportWarnings(exportChapters),
+      }
     }
 
     return {
@@ -885,7 +922,8 @@ ${dto.content}`
       format,
       mimeType: 'text/markdown; charset=utf-8',
       fileName: `${this.safeFileName(project.title)}.md`,
-      content: parts.join('\n').trimEnd() + '\n',
+      content: markdown,
+      warnings: this.exportWarnings(exportChapters),
     }
   }
 
@@ -944,13 +982,29 @@ ${chapterBriefs.join('\n')}
       .map((item) => this.normalizeText(item))
       .filter(Boolean)
       .slice(0, 6)
+    const synopsis = this.normalizeText(parsed.synopsis, this.truncate(fallbackSynopsis, 300))
+    const finalSellingPoints = sellingPoints.length ? sellingPoints : this.buildPublishingSellingPointFallbacks(project)
+    const coverPrompt = this.normalizeText(parsed.coverPrompt, `${project.title}，${project.genre || '小说'}封面，核心意象来自章节内容`)
+    const coverSvg = this.buildCoverSvg(project, coverPrompt, synopsis, finalSellingPoints)
+    const savedAsset = await this.prisma.publishingAsset?.create?.({
+      data: {
+        projectId,
+        synopsis,
+        sellingPoints: JSON.stringify(finalSellingPoints),
+        coverPrompt,
+        coverSvg,
+      },
+    })
 
     return {
       projectId,
       title: project.title,
-      synopsis: this.normalizeText(parsed.synopsis, this.truncate(fallbackSynopsis, 300)),
-      sellingPoints: sellingPoints.length ? sellingPoints : this.buildPublishingSellingPointFallbacks(project),
-      coverPrompt: this.normalizeText(parsed.coverPrompt, `${project.title}，${project.genre || '小说'}封面，核心意象来自章节内容`),
+      assetId: savedAsset?.id,
+      synopsis,
+      sellingPoints: finalSellingPoints,
+      coverPrompt,
+      coverSvg,
+      updatedAt: savedAsset?.updatedAt,
       sourceStats: {
         chapters: chapters.length,
         acceptedChapters: latestAcceptedByChapter.size,
@@ -1123,6 +1177,144 @@ ${this.chapterText(chapter)}`
     return name || 'book'
   }
 
+  private exportWarnings(chapters: any[]) {
+    return chapters
+      .filter((chapter) => !chapter.hasAcceptedCommit)
+      .map((chapter) => `章节《${chapter.title}》未找到 accepted commit，导出当前草稿。`)
+  }
+
+  private async buildEpub(project: any, chapters: any[], asset: any, markdown: string) {
+    const zip = new JSZip()
+    zip.file('mimetype', 'application/epub+zip', { compression: 'STORE' })
+    zip.file('META-INF/container.xml', `<?xml version="1.0" encoding="UTF-8"?>
+<container version="1.0" xmlns="urn:oasis:names:tc:opendocument:xmlns:container">
+  <rootfiles>
+    <rootfile full-path="OEBPS/package.opf" media-type="application/oebps-package+xml"/>
+  </rootfiles>
+</container>`)
+    const coverSvg = asset?.coverSvg || this.buildCoverSvg(project, asset?.coverPrompt || '', project.synopsis || '', [])
+    zip.file('OEBPS/cover.svg', coverSvg)
+    zip.file('OEBPS/nav.xhtml', this.buildEpubNav(project, chapters))
+    zip.file('OEBPS/package.opf', this.buildEpubPackage(project, chapters))
+    zip.file('OEBPS/intro.xhtml', this.xhtmlDocument('简介', this.markdownText(asset?.synopsis || project.synopsis || '')))
+    chapters.forEach((chapter, index) => {
+      zip.file(`OEBPS/chapter-${index + 1}.xhtml`, this.xhtmlDocument(`第 ${chapter.order + 1} 章 ${chapter.title}`, this.markdownText(chapter.body)))
+    })
+    zip.file('OEBPS/book.md', markdown)
+    return zip.generateAsync({ type: 'nodebuffer', compression: 'DEFLATE' })
+  }
+
+  private buildEpubPackage(project: any, chapters: any[]) {
+    const manifestChapters = chapters
+      .map((_, index) => `<item id="chapter-${index + 1}" href="chapter-${index + 1}.xhtml" media-type="application/xhtml+xml"/>`)
+      .join('\n    ')
+    const spineChapters = chapters.map((_, index) => `<itemref idref="chapter-${index + 1}"/>`).join('\n    ')
+    return `<?xml version="1.0" encoding="UTF-8"?>
+<package xmlns="http://www.idpf.org/2007/opf" unique-identifier="book-id" version="3.0">
+  <metadata xmlns:dc="http://purl.org/dc/elements/1.1/">
+    <dc:identifier id="book-id">${this.escapeXml(project.id || project.title)}</dc:identifier>
+    <dc:title>${this.escapeXml(project.title)}</dc:title>
+    <dc:language>zh-CN</dc:language>
+  </metadata>
+  <manifest>
+    <item id="nav" href="nav.xhtml" media-type="application/xhtml+xml" properties="nav"/>
+    <item id="cover" href="cover.svg" media-type="image/svg+xml"/>
+    <item id="intro" href="intro.xhtml" media-type="application/xhtml+xml"/>
+    ${manifestChapters}
+  </manifest>
+  <spine>
+    <itemref idref="intro"/>
+    ${spineChapters}
+  </spine>
+</package>`
+  }
+
+  private buildEpubNav(project: any, chapters: any[]) {
+    const chapterLinks = chapters
+      .map((chapter, index) => `<li><a href="chapter-${index + 1}.xhtml">第 ${chapter.order + 1} 章 ${this.escapeXml(chapter.title)}</a></li>`)
+      .join('\n        ')
+    return `<?xml version="1.0" encoding="UTF-8"?>
+<html xmlns="http://www.w3.org/1999/xhtml">
+  <head><title>${this.escapeXml(project.title)}</title></head>
+  <body>
+    <nav epub:type="toc" xmlns:epub="http://www.idpf.org/2007/ops">
+      <h1>${this.escapeXml(project.title)}</h1>
+      <ol>
+        <li><a href="intro.xhtml">简介</a></li>
+        ${chapterLinks}
+      </ol>
+    </nav>
+  </body>
+</html>`
+  }
+
+  private xhtmlDocument(title: string, body: string) {
+    const paragraphs = body
+      .split(/\n{2,}/)
+      .map((paragraph) => paragraph.trim())
+      .filter(Boolean)
+      .map((paragraph) => `<p>${this.escapeXml(paragraph).replace(/\n/g, '<br/>')}</p>`)
+      .join('\n    ')
+    return `<?xml version="1.0" encoding="UTF-8"?>
+<html xmlns="http://www.w3.org/1999/xhtml">
+  <head><title>${this.escapeXml(title)}</title></head>
+  <body>
+    <h1>${this.escapeXml(title)}</h1>
+    ${paragraphs}
+  </body>
+</html>`
+  }
+
+  private buildPdf(project: any, chapters: any[], asset: any) {
+    return new Promise<Buffer>((resolve, reject) => {
+      const doc = new PDFDocument({ margin: 50 })
+      const chunks: Buffer[] = []
+      doc.on('data', (chunk) => chunks.push(Buffer.from(chunk)))
+      doc.on('end', () => resolve(Buffer.concat(chunks)))
+      doc.on('error', reject)
+      doc.fontSize(24).text(project.title || 'Untitled', { align: 'center' })
+      if (asset?.coverPrompt) {
+        doc.moveDown().fontSize(10).fillColor('gray').text(asset.coverPrompt, { align: 'center' }).fillColor('black')
+      }
+      const synopsis = this.markdownText(asset?.synopsis || project.synopsis || '')
+      if (synopsis) {
+        doc.moveDown().fontSize(14).text('简介')
+        doc.moveDown(0.5).fontSize(11).text(synopsis)
+      }
+      const points = this.asArray(this.parseJson(asset?.sellingPoints, []))
+      if (points.length) {
+        doc.moveDown().fontSize(14).text('卖点')
+        points.forEach((point) => doc.fontSize(11).text(`- ${point}`))
+      }
+      chapters.forEach((chapter) => {
+        doc.addPage()
+        doc.fontSize(18).text(`第 ${chapter.order + 1} 章 ${chapter.title}`)
+        doc.moveDown().fontSize(11).text(this.markdownText(chapter.body))
+      })
+      doc.end()
+    })
+  }
+
+  private buildCoverSvg(project: any, coverPrompt: string, synopsis: string, sellingPoints: string[]) {
+    const title = this.escapeXml(this.truncate(project.title || 'Untitled', 28))
+    const genre = this.escapeXml(this.truncate(project.genre || 'Novel', 24))
+    const prompt = this.escapeXml(this.truncate(coverPrompt || synopsis || sellingPoints.join(' / '), 80))
+    return `<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="1800" viewBox="0 0 1200 1800">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#111827"/>
+      <stop offset="0.58" stop-color="#374151"/>
+      <stop offset="1" stop-color="#f59e0b"/>
+    </linearGradient>
+  </defs>
+  <rect width="1200" height="1800" fill="url(#bg)"/>
+  <rect x="90" y="120" width="1020" height="1560" fill="none" stroke="#f9fafb" stroke-width="6" opacity="0.7"/>
+  <text x="600" y="650" text-anchor="middle" font-size="96" font-family="serif" fill="#ffffff">${title}</text>
+  <text x="600" y="750" text-anchor="middle" font-size="34" font-family="sans-serif" fill="#fde68a">${genre}</text>
+  <text x="600" y="1230" text-anchor="middle" font-size="28" font-family="sans-serif" fill="#f9fafb">${prompt}</text>
+</svg>`
+  }
+
   private extractJsonText(value: unknown) {
     const text = this.normalizeText(value)
     const fenced = text.match(/```(?:json)?\s*([\s\S]*?)```/i)
@@ -1143,6 +1335,15 @@ ${this.chapterText(chapter)}`
       project.genre ? `${project.genre} genre hook` : `${project.title} story premise`,
       ...tags.map((tag) => `${tag} element`),
     ].slice(0, 6)
+  }
+
+  private escapeXml(value: unknown) {
+    return this.normalizeText(value)
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;')
+      .replace(/'/g, '&#039;')
   }
 
   private nextStep(step: StoryAgentStepType) {

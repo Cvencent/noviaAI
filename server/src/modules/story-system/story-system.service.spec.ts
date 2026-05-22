@@ -1,4 +1,5 @@
 import { BadRequestException, ForbiddenException, NotFoundException } from '@nestjs/common'
+import JSZip = require('jszip')
 import { StorySystemService } from './story-system.service'
 
 describe('StorySystemService', () => {
@@ -112,6 +113,10 @@ describe('StorySystemService', () => {
       openLoop: {
         upsert: jest.fn(),
         findMany: jest.fn(),
+      },
+      publishingAsset: {
+        create: jest.fn(),
+        findFirst: jest.fn(),
       },
       storyEntity: {
         upsert: jest.fn(),
@@ -841,6 +846,59 @@ describe('StorySystemService', () => {
     expect(exported.content).toContain('沈遥消失在雨巷。')
   })
 
+  it('exports the book to EPUB with standard package entries and cover asset', async () => {
+    mockProjectGraph()
+    prisma.chapter.findMany.mockResolvedValue([
+      { id: 'chapter-1', title: '旧港质问', order: 0, contents: [{ order: 0, content: '草稿不应优先。' }] },
+    ])
+    prisma.chapterCommit.findMany.mockResolvedValue([
+      { id: 'commit-1', chapterId: 'chapter-1', status: 'ACCEPTED', contentSnapshot: '<p>林澄拿出芯片。</p>', createdAt: new Date('2026-05-22T01:00:00Z') },
+    ])
+    prisma.publishingAsset.findFirst.mockResolvedValue({
+      id: 'asset-1',
+      coverSvg: '<svg xmlns="http://www.w3.org/2000/svg"><text>雨城</text></svg>',
+      synopsis: '一座靠记忆交易运转的城市。',
+      sellingPoints: JSON.stringify(['记忆交易']),
+      coverPrompt: '雨夜旧港',
+    })
+
+    const exported = await service.exportBook('user-1', 'project-1', { format: 'EPUB' })
+    const zip = await JSZip.loadAsync(Buffer.from(exported.contentBase64, 'base64'))
+
+    expect(exported.format).toBe('EPUB')
+    expect(exported.mimeType).toBe('application/epub+zip')
+    expect(exported.fileName).toBe('雨城.epub')
+    expect(await zip.file('mimetype')?.async('string')).toBe('application/epub+zip')
+    expect(zip.file('META-INF/container.xml')).toBeTruthy()
+    expect(zip.file('OEBPS/package.opf')).toBeTruthy()
+    expect(zip.file('OEBPS/nav.xhtml')).toBeTruthy()
+    expect(zip.file('OEBPS/cover.svg')).toBeTruthy()
+    expect(await zip.file('OEBPS/chapter-1.xhtml')?.async('string')).toContain('林澄拿出芯片。')
+  })
+
+  it('exports the book to PDF bytes with publishing cover metadata', async () => {
+    mockProjectGraph()
+    prisma.chapter.findMany.mockResolvedValue([
+      { id: 'chapter-1', title: '旧港质问', order: 0, contents: [{ order: 0, content: '林澄拿出芯片。' }] },
+    ])
+    prisma.chapterCommit.findMany.mockResolvedValue([])
+    prisma.publishingAsset.findFirst.mockResolvedValue({
+      id: 'asset-1',
+      coverSvg: '<svg xmlns="http://www.w3.org/2000/svg"><text>雨城</text></svg>',
+      synopsis: '一座靠记忆交易运转的城市。',
+      sellingPoints: JSON.stringify(['记忆交易']),
+      coverPrompt: '雨夜旧港',
+    })
+
+    const exported = await service.exportBook('user-1', 'project-1', { format: 'PDF' })
+    const bytes = Buffer.from(exported.contentBase64, 'base64')
+
+    expect(exported.format).toBe('PDF')
+    expect(exported.mimeType).toBe('application/pdf')
+    expect(exported.fileName).toBe('雨城.pdf')
+    expect(bytes.subarray(0, 4).toString()).toBe('%PDF')
+  })
+
   it('generates publishing assets from accepted chapter snapshots', async () => {
     mockProjectGraph()
     prisma.chapter.findMany.mockResolvedValue([
@@ -857,14 +915,24 @@ describe('StorySystemService', () => {
         coverPrompt: '雨夜城市，霓虹旧港，破裂的记忆芯片，悬疑小说封面',
       }),
     })
+    prisma.publishingAsset.create.mockImplementation(({ data }: any) => Promise.resolve({ id: 'asset-1', updatedAt: new Date('2026-05-22T01:00:00Z'), ...data }))
 
     const assets = await service.generatePublishingAssets('user-1', 'project-1', { audience: '悬疑读者' })
 
     expect(assets.projectId).toBe('project-1')
+    expect(assets.assetId).toBe('asset-1')
     expect(assets.synopsis).toContain('记忆交易城市')
     expect(assets.sellingPoints).toEqual(['记忆交易悬疑设定', '双主角身份博弈'])
     expect(assets.coverPrompt).toContain('霓虹旧港')
+    expect(assets.coverSvg).toContain('<svg')
     expect(assets.sourceStats).toEqual({ chapters: 2, acceptedChapters: 1 })
+    expect(prisma.publishingAsset.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({
+        projectId: 'project-1',
+        coverSvg: expect.stringContaining('<svg'),
+        sellingPoints: JSON.stringify(['记忆交易悬疑设定', '双主角身份博弈']),
+      }),
+    })
     expect(aiService.chat).toHaveBeenCalledWith('user-1', expect.objectContaining({
       projectId: 'project-1',
       action: expect.any(String),

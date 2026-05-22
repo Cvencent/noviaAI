@@ -176,15 +176,20 @@ export interface BookExportResult {
   format: string
   mimeType: string
   fileName: string
-  content: string
+  content?: string
+  contentBase64?: string
+  warnings?: string[]
 }
 
 export interface PublishingAssets {
   projectId: string
   title: string
+  assetId?: string
   synopsis: string
   sellingPoints: string[]
   coverPrompt: string
+  coverSvg?: string
+  updatedAt?: string
   sourceStats: {
     chapters: number
     acceptedChapters: number

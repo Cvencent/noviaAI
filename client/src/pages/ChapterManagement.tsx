@@ -164,20 +164,27 @@ export function ChapterManagement() {
     }
   }
 
-  const handleExportMarkdown = async () => {
+  const downloadExport = (exported: { content?: string; contentBase64?: string; mimeType?: string; fileName: string }) => {
+    const payload = exported.contentBase64
+      ? Uint8Array.from(atob(exported.contentBase64), (char) => char.charCodeAt(0))
+      : exported.content || ''
+    const blob = new Blob([payload], { type: exported.mimeType || 'application/octet-stream' })
+    const url = URL.createObjectURL(blob)
+    const link = document.createElement('a')
+    link.href = url
+    link.download = exported.fileName
+    link.click()
+    URL.revokeObjectURL(url)
+  }
+
+  const handleExportBook = async (format: 'MARKDOWN' | 'EPUB' | 'PDF') => {
     if (!projectId) return
     setIsStoryActionBusy(true)
     try {
-      const exported = await storySystemApi.exportBook(projectId, { format: 'MARKDOWN' })
-      const blob = new Blob([exported.content], { type: exported.mimeType || 'text/markdown;charset=utf-8' })
-      const url = URL.createObjectURL(blob)
-      const link = document.createElement('a')
-      link.href = url
-      link.download = exported.fileName
-      link.click()
-      URL.revokeObjectURL(url)
+      const exported = await storySystemApi.exportBook(projectId, { format })
+      downloadExport(exported)
     } catch (error) {
-      console.error('Markdown 导出失败:', error)
+      console.error(`${format} 导出失败:`, error)
     } finally {
       setIsStoryActionBusy(false)
     }
@@ -227,9 +234,17 @@ export function ChapterManagement() {
               <ShieldCheck className="w-4 h-4 mr-2" />
               全书审查
             </Button>
-            <Button variant="outline" onClick={handleExportMarkdown} isLoading={isStoryActionBusy}>
+            <Button variant="outline" onClick={() => handleExportBook('MARKDOWN')} isLoading={isStoryActionBusy}>
               <Download className="w-4 h-4 mr-2" />
               导出 Markdown
+            </Button>
+            <Button variant="outline" onClick={() => handleExportBook('EPUB')} isLoading={isStoryActionBusy}>
+              <Download className="w-4 h-4 mr-2" />
+              EPUB
+            </Button>
+            <Button variant="outline" onClick={() => handleExportBook('PDF')} isLoading={isStoryActionBusy}>
+              <Download className="w-4 h-4 mr-2" />
+              PDF
             </Button>
             <Button variant="outline" onClick={handleGeneratePublishingAssets} isLoading={isStoryActionBusy}>
               <Sparkles className="w-4 h-4 mr-2" />

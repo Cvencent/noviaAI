@@ -78,10 +78,25 @@ model Project {
   openLoops               OpenLoop[]
   storyEntities           StoryEntity[]
   storyRelations          StoryRelation[]
+  publishingAssets        PublishingAsset[]
 
   // 写作风格配置
   currentWritingStyleId String?
   writingStyleConfig    String?
+}
+
+model PublishingAsset {
+  id            String   @id @default(uuid())
+  projectId     String
+  synopsis      String
+  sellingPoints String
+  coverPrompt   String
+  coverSvg      String
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+  project       Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  @@index([projectId])
 }
 
 model WorldSetting {
