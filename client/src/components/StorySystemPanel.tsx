@@ -385,6 +385,13 @@ export function StorySystemPanel({
             <div className="text-sm font-medium text-gray-900">
               ContextPack · {contextPack.totalTokenEstimate} tokens
             </div>
+            {contextPack.warnings.length > 0 && (
+              <div className="rounded border border-yellow-100 bg-yellow-50 p-2 text-xs text-yellow-800">
+                {contextPack.warnings.map((warning) => (
+                  <div key={warning}>{warning}</div>
+                ))}
+              </div>
+            )}
             <div className="space-y-2">
               {contextPack.sections.map((section) => (
                 <details key={section.layer} className="rounded-lg border border-gray-200 p-2">
