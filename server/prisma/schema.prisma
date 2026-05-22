@@ -65,6 +65,10 @@ model Project {
   turningPoints           TurningPoint[]
   timelineEvents          TimelineEvent[]
   dialogueSessions        DialogueSession[]
+  storyContracts          StoryContract[]
+  storyContextPacks       StoryContextPack[]
+  storyAgentRuns          StoryAgentRun[]
+  chapterCommits          ChapterCommit[]
   
   // 写作风格配置
   currentWritingStyleId   String?
@@ -184,6 +188,10 @@ model Chapter {
   loreUsages LoreUsage[]
   setupGuns  ChekhovsGun[]  @relation("SetupChapter")
   payoffGuns ChekhovsGun[]  @relation("PayoffChapter")
+  storyContracts StoryContract[]
+  storyContextPacks StoryContextPack[]
+  storyAgentRuns StoryAgentRun[]
+  chapterCommits ChapterCommit[]
 }
 
 model ChapterContent {
@@ -533,4 +541,108 @@ model DialogueMessage {
 
   @@index([sessionId])
   @@index([order])
+}
+
+// ==================== Story System 合同/Agent/提交链 ====================
+model StoryContract {
+  id          String   @id @default(uuid())
+  projectId   String
+  chapterId   String?
+  type        String   // MASTER_SETTING, VOLUME_BRIEF, CHAPTER_BRIEF, REVIEW_CONTRACT
+  version     String   @default("story-system/v1")
+  status      String   @default("ACTIVE") // ACTIVE, SUPERSEDED
+  payload     String
+  sourceTrace String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  project     Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  chapter     Chapter? @relation(fields: [chapterId], references: [id], onDelete: Cascade)
+
+  @@unique([projectId, chapterId, type])
+  @@index([projectId])
+  @@index([chapterId])
+  @@index([type])
+}
+
+model StoryContextPack {
+  id                 String   @id @default(uuid())
+  projectId          String
+  chapterId          String?
+  status             String   @default("READY") // READY, STALE, FAILED
+  sections           String
+  totalTokenEstimate Int      @default(0)
+  warnings           String?
+  createdAt          DateTime @default(now())
+  updatedAt          DateTime @updatedAt
+  project            Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  chapter            Chapter? @relation(fields: [chapterId], references: [id], onDelete: Cascade)
+
+  @@index([projectId])
+  @@index([chapterId])
+  @@index([status])
+}
+
+model StoryAgentRun {
+  id          String           @id @default(uuid())
+  projectId   String
+  chapterId   String?
+  mode        String           @default("FULL_WRITE") // FULL_WRITE, REVIEW_ONLY, EXTRACT_ONLY
+  status      String           @default("RUNNING") // RUNNING, PAUSED, COMPLETED, FAILED
+  currentStep String           @default("CONTEXT")
+  instruction String?
+  metadata    String?
+  createdAt   DateTime         @default(now())
+  updatedAt   DateTime         @updatedAt
+  project     Project          @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  chapter     Chapter?         @relation(fields: [chapterId], references: [id], onDelete: Cascade)
+  steps       StoryAgentStep[]
+  commits     ChapterCommit[]
+
+  @@index([projectId])
+  @@index([chapterId])
+  @@index([status])
+}
+
+model StoryAgentStep {
+  id        String        @id @default(uuid())
+  runId     String
+  stepType  String        // CONTEXT, DRAFT, REVIEW, EXTRACT, COMMIT
+  status    String        @default("PENDING") // PENDING, RUNNING, COMPLETED, FAILED
+  input     String?
+  output    String?
+  error     String?
+  order     Int           @default(0)
+  createdAt DateTime      @default(now())
+  updatedAt DateTime      @updatedAt
+  run       StoryAgentRun @relation(fields: [runId], references: [id], onDelete: Cascade)
+
+  @@index([runId])
+  @@index([stepType])
+  @@index([status])
+}
+
+model ChapterCommit {
+  id                String         @id @default(uuid())
+  projectId          String
+  chapterId          String
+  runId              String?
+  status             String         @default("PENDING") // ACCEPTED, REJECTED, PENDING
+  contentSnapshot    String
+  reviewResult       String
+  fulfillmentResult  String
+  extractionResult   String
+  acceptedEvents     String?
+  stateDeltas        String?
+  entityDeltas       String?
+  summaryText        String?
+  projectionStatus   String
+  createdAt          DateTime       @default(now())
+  project            Project        @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  chapter            Chapter        @relation(fields: [chapterId], references: [id], onDelete: Cascade)
+  agentRun           StoryAgentRun? @relation(fields: [runId], references: [id], onDelete: SetNull)
+
+  @@index([projectId])
+  @@index([chapterId])
+  @@index([runId])
+  @@index([status])
 }

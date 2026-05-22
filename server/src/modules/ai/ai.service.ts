@@ -66,6 +66,7 @@ export class AiService {
         model,
         messages,
         temperature: dto.temperature,
+        maxTokens: dto.maxTokens,
       })
 
       await this.logUsage(userId, dto.projectId, 'chat', 'POST', 200, messages, result)

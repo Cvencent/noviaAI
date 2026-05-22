@@ -3,7 +3,6 @@ import { useParams, useNavigate } from 'react-router-dom'
 import { 
   Save, 
   Sparkles, 
-  Square,
   AlertTriangle,
   BookOpen,
   Eye,
@@ -14,7 +13,8 @@ import {
   Link2,
   Palette,
   Flag,
-  MessageSquare
+  MessageSquare,
+  GitBranch
 } from 'lucide-react'
 import { Button } from '../components/ui/Button'
 import { Card } from '../components/ui/Card'
@@ -29,6 +29,8 @@ import { ProjectStyleSelector } from '../components/ProjectStyleSelector'
 import { LorebookManager } from '../components/LorebookManager'
 import { ChekhovsGunManager } from '../components/ChekhovsGunManager'
 import { DialogueSandbox } from '../components/DialogueSandbox'
+import { StorySystemPanel } from '../components/StorySystemPanel'
+import { storySystemApi } from '../api/story-system'
 import { RichTextEditor, RichTextEditorHandle } from '../components/editor/RichTextEditor'
 import { ContextViewer } from '../components/ContextViewer'
 import { StreamingCursor } from '../components/StreamingCursor'
@@ -90,11 +92,15 @@ export function ChapterEditor() {
   const [showGunPanel, setShowGunPanel] = useState(false)
   const [showContextPanel, setShowContextPanel] = useState(false)
   const [showDialoguePanel, setShowDialoguePanel] = useState(false)
+  const [showStorySystemPanel, setShowStorySystemPanel] = useState(false)
   const [contextPreview, setContextPreview] = useState<ContextPreview | null>(null)
   const [isLoadingContextPreview, setIsLoadingContextPreview] = useState(false)
   
   const [selectedText, setSelectedText] = useState('')
   const [showDiffControls, setShowDiffControls] = useState(false)
+  const [isStoryWriting, setIsStoryWriting] = useState(false)
+  const [storyWriteError, setStoryWriteError] = useState('')
+  const [storyWriteText, setStoryWriteText] = useState('')
   const contentRef = useRef('')
   const lastSavedContentRef = useRef('')
   const aiOriginalContentRef = useRef('')
@@ -347,8 +353,6 @@ export function ChapterEditor() {
     isStreaming,
     streamedText,
     error: streamingError,
-    startStream,
-    stopStream,
   } = useStreamCompletion({
     onComplete: async (completion) => {
       await appendAiText(completion, aiOriginalContentRef.current)
@@ -360,18 +364,33 @@ export function ChapterEditor() {
 
   const handleAiWrite = async () => {
     const originalContent = contentRef.current
-    if (!projectId || !originalContent.trim()) return
+    if (!projectId || !chapterId || !originalContent.trim()) return
 
-    if (isStreaming) {
-      stopStream()
+    if (isStoryWriting) {
       return
     }
 
     aiOriginalContentRef.current = originalContent
-    startStream({
-      projectId,
-      content: originalContent,
-    })
+    setIsStoryWriting(true)
+    setStoryWriteError('')
+    setStoryWriteText('')
+    try {
+      const result = await storySystemApi.writeChapter(projectId, chapterId, {
+        content: originalContent,
+      })
+      if (result.blocked) {
+        setStoryWriteError(result.preflight.blockingReasons.join('；') || 'Story System 预检阻断')
+        return
+      }
+      setStoryWriteText(result.completion)
+      await appendAiText(result.completion, originalContent)
+      await loadContextPreview()
+    } catch (error) {
+      console.error('Story System 续写失败:', error)
+      setStoryWriteError(error instanceof Error ? error.message : 'Story System 续写失败')
+    } finally {
+      setIsStoryWriting(false)
+    }
   }
 
   useEffect(() => {
@@ -560,6 +579,10 @@ export function ChapterEditor() {
               <Eye className="w-4 h-4 mr-2" />
               AI 视野
             </Button>
+            <Button variant="outline" size="sm" onClick={() => setShowStorySystemPanel(!showStorySystemPanel)}>
+              <GitBranch className="w-4 h-4 mr-2" />
+              Story
+            </Button>
             <Button variant="outline" size="sm" onClick={() => setShowDialoguePanel(!showDialoguePanel)}>
               <MessageSquare className="w-4 h-4 mr-2" />
               对话沙盒
@@ -577,17 +600,17 @@ export function ChapterEditor() {
               variant="outline" 
               size="sm" 
               onClick={handleAiWrite}
-              disabled={!isStreaming && !content.trim()}
+              disabled={isStoryWriting || !content.trim()}
             >
-              {isStreaming ? (
+              {isStoryWriting ? (
                 <>
-                  <Square className="w-4 h-4 mr-2" />
-                  停止生成
+                  <Sparkles className="w-4 h-4 mr-2" />
+                  Story 写作中
                 </>
               ) : (
                 <>
                   <Sparkles className="w-4 h-4 mr-2" />
-                  AI 续写
+                  Story 续写
                 </>
               )}
             </Button>
@@ -628,17 +651,21 @@ export function ChapterEditor() {
                 className="w-full h-full min-h-[500px]"
               />
             </Card>
-            {(isStreaming || streamedText || streamingError) && (
+            {(isStreaming || streamedText || streamingError || isStoryWriting || storyWriteText || storyWriteError) && (
               <Card className="mt-4 p-4">
                 <div className="mb-2 text-sm text-gray-500">
-                  {isStreaming ? 'AI 正在生成：' : streamingError ? 'AI 生成失败' : 'AI 生成结果'}
+                  {isStoryWriting
+                    ? 'Story System 正在生成：'
+                    : storyWriteError || streamingError
+                      ? 'AI 生成失败'
+                      : 'AI 生成结果'}
                 </div>
-                {streamingError ? (
-                  <div className="text-sm text-red-600">{streamingError.message}</div>
+                {storyWriteError || streamingError ? (
+                  <div className="text-sm text-red-600">{storyWriteError || streamingError?.message}</div>
                 ) : (
                   <div className="whitespace-pre-wrap text-gray-800">
-                    {streamedText}
-                    <StreamingCursor isVisible={isStreaming} />
+                    {storyWriteText || streamedText}
+                    <StreamingCursor isVisible={isStreaming || isStoryWriting} />
                   </div>
                 )}
               </Card>
@@ -765,6 +792,17 @@ export function ChapterEditor() {
               chapterId={chapterId}
               onClose={() => setShowDialoguePanel(false)}
               onInsertText={handleInsertText}
+            />
+          </div>
+        )}
+
+        {showStorySystemPanel && projectId && chapterId && (
+          <div className="w-[30rem] bg-white border-l border-gray-200 overflow-y-auto">
+            <StorySystemPanel
+              projectId={projectId}
+              chapterId={chapterId}
+              content={content}
+              onClose={() => setShowStorySystemPanel(false)}
             />
           </div>
         )}

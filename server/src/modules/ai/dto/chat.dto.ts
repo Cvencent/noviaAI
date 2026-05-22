@@ -24,6 +24,9 @@ export class ChatDto {
   temperature?: number
 
   @IsOptional()
+  maxTokens?: number
+
+  @IsOptional()
   @IsEnum(AIAction)
   action?: AIAction
 }

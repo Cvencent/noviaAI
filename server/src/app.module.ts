@@ -20,6 +20,7 @@ import { PlotsModule } from './modules/plots/plots.module'
 import { WritingStylesModule } from './modules/writing-styles/writing-styles.module'
 import { ConsistencyModule } from './modules/consistency/consistency.module'
 import { DialogueSessionsModule } from './modules/dialogue-sessions/dialogue-sessions.module'
+import { StorySystemModule } from './modules/story-system/story-system.module'
 
 @Module({
   imports: [
@@ -46,6 +47,7 @@ import { DialogueSessionsModule } from './modules/dialogue-sessions/dialogue-ses
     WritingStylesModule,
     ConsistencyModule,
     DialogueSessionsModule,
+    StorySystemModule,
   ],
 })
 export class AppModule {}

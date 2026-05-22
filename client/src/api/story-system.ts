@@ -1,0 +1,185 @@
+import { apiClient } from './client'
+
+export interface StoryContract {
+  id: string
+  type: string
+  payload: string
+  status: string
+  updatedAt?: string
+}
+
+export interface StoryContextSection {
+  layer: string
+  title: string
+  priority: 'critical' | 'high' | 'medium' | 'low'
+  source: string
+  items: string[]
+  tokenEstimate: number
+}
+
+export interface StoryContextPack {
+  id: string
+  status: string
+  sections: StoryContextSection[]
+  totalTokenEstimate: number
+  warnings: string[]
+}
+
+export interface StoryPreflightResult {
+  chapterId: string
+  blocking: boolean
+  blockingReasons: string[]
+  warnings: string[]
+  missingContracts: string[]
+}
+
+export interface StoryRuntimeHealth {
+  projectId: string
+  chapterId: string
+  mainlineReady: boolean
+  fallbackSources: string[]
+  latestCommitStatus: string
+  contextPackStatus: string
+  agentRunStatus: string
+  primaryWriteSource: string
+}
+
+export interface StoryAgentStep {
+  id: string
+  stepType: string
+  status: string
+  output?: string
+  error?: string
+  order: number
+}
+
+export interface StoryAgentRun {
+  id: string
+  mode: string
+  status: string
+  currentStep: string
+  instruction?: string
+  steps?: StoryAgentStep[]
+}
+
+export interface ChapterCommit {
+  id: string
+  status: string
+  contentSnapshot: string
+  reviewResult: string
+  fulfillmentResult: string
+  extractionResult: string
+  summaryText?: string
+  projectionStatus: string
+  createdAt: string
+}
+
+export interface StoryWriteResult {
+  blocked: boolean
+  completion: string
+  runId?: string
+  contextPackId?: string
+  preflight: StoryPreflightResult
+}
+
+export const storySystemApi = {
+  async refreshContracts(projectId: string, chapterId: string): Promise<{ contracts: StoryContract[] }> {
+    const response = await apiClient.post(
+      `/projects/${projectId}/chapters/${chapterId}/story-system/contracts/refresh`,
+    )
+    return response.data
+  },
+
+  async buildContextPack(projectId: string, chapterId: string): Promise<StoryContextPack> {
+    const response = await apiClient.post(
+      `/projects/${projectId}/chapters/${chapterId}/story-system/context-pack`,
+    )
+    return response.data
+  },
+
+  async preflight(projectId: string, chapterId: string): Promise<StoryPreflightResult> {
+    const response = await apiClient.post(
+      `/projects/${projectId}/chapters/${chapterId}/story-system/preflight`,
+    )
+    return response.data
+  },
+
+  async health(projectId: string, chapterId: string): Promise<StoryRuntimeHealth> {
+    const response = await apiClient.get(
+      `/projects/${projectId}/chapters/${chapterId}/story-system/health`,
+    )
+    return response.data
+  },
+
+  async review(projectId: string, chapterId: string, content: string) {
+    const response = await apiClient.post(
+      `/projects/${projectId}/chapters/${chapterId}/story-system/review`,
+      { content },
+    )
+    return response.data
+  },
+
+  async writeChapter(projectId: string, chapterId: string, data: {
+    content?: string
+    instruction?: string
+    temperature?: number
+    maxTokens?: number
+  }): Promise<StoryWriteResult> {
+    const response = await apiClient.post(
+      `/projects/${projectId}/chapters/${chapterId}/story-system/write`,
+      data,
+    )
+    return response.data
+  },
+
+  async createCommit(projectId: string, chapterId: string, data: {
+    content: string
+    runId?: string
+    reviewResult?: { issues?: Array<{ severity?: string; message?: string; blocking?: boolean }> }
+    extractionResult?: {
+      acceptedEvents?: unknown[]
+      stateDeltas?: unknown[]
+      entityDeltas?: unknown[]
+      summaryText?: string
+    }
+  }): Promise<ChapterCommit> {
+    const response = await apiClient.post(
+      `/projects/${projectId}/chapters/${chapterId}/story-system/commits`,
+      data,
+    )
+    return response.data
+  },
+
+  async listCommits(projectId: string, chapterId: string): Promise<ChapterCommit[]> {
+    const response = await apiClient.get(
+      `/projects/${projectId}/chapters/${chapterId}/story-system/commits`,
+    )
+    return response.data
+  },
+
+  async startRun(projectId: string, chapterId: string, data: { mode?: string; instruction?: string }): Promise<StoryAgentRun> {
+    const response = await apiClient.post(
+      `/projects/${projectId}/chapters/${chapterId}/story-system/agent-runs`,
+      data,
+    )
+    return response.data
+  },
+
+  async continueRun(projectId: string, runId: string, data: { stopAfterStep?: string; maxSteps?: number }): Promise<StoryAgentRun> {
+    const response = await apiClient.post(
+      `/projects/${projectId}/story-system/agent-runs/${runId}/continue`,
+      data,
+    )
+    return response.data
+  },
+
+  async pauseRun(projectId: string, runId: string): Promise<StoryAgentRun> {
+    const response = await apiClient.post(`/projects/${projectId}/story-system/agent-runs/${runId}/pause`)
+    return response.data
+  },
+
+  async resumeRun(projectId: string, runId: string): Promise<StoryAgentRun> {
+    const response = await apiClient.post(`/projects/${projectId}/story-system/agent-runs/${runId}/resume`)
+    return response.data
+  },
+}
