@@ -94,6 +94,12 @@
   border-bottom: 2px solid #dc3545;
 }
 
+.diff-issue {
+  background-color: #fef3c7;
+  text-decoration: none;
+  border-bottom: 2px solid #d97706;
+}
+
 .diff-controls {
   position: sticky;
   bottom: 0;

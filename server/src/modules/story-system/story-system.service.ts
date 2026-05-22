@@ -115,12 +115,15 @@ export class StorySystemService {
     const chapterBrief = contractMap.CHAPTER_BRIEF
     const reviewContract = contractMap.REVIEW_CONTRACT
     const currentContent = this.chapterText(chapter)
-    const sections = [
+    const warnings: string[] = []
+    const rawSections = [
       {
         layer: 'contract',
         title: '章节合同',
         priority: 'critical',
         source: 'StoryContract',
+        reason: '本章目标、冲突、必覆节点必须进入写作 prompt。',
+        budget: 1200,
         items: [
           `目标：${chapterBrief?.chapterDirective?.goal || chapter.title}`,
           `冲突：${chapterBrief?.chapterDirective?.conflict || '未明确'}`,
@@ -132,6 +135,8 @@ export class StorySystemService {
         title: '当前工作记忆',
         priority: 'critical',
         source: 'Chapter',
+        reason: '当前正文和近章摘要决定续写的直接衔接。',
+        budget: 1000,
         items: [
           `当前章节：第 ${chapter.order + 1} 章 ${chapter.title}`,
           currentContent ? `当前正文：${this.truncate(currentContent, 800)}` : '当前正文为空',
@@ -143,6 +148,8 @@ export class StorySystemService {
         title: '近期事件',
         priority: 'high',
         source: 'TimelineEvent,ChekhovsGun',
+        reason: '近期事件和伏笔用于保持情节连续。',
+        budget: 800,
         items: [
           ...timelineEvents.slice(-8).map((event: any) => `${event.timeLabel || ''}${event.title}：${event.description || ''}`),
           ...chekhovsGuns.slice(0, 8).map((gun: any) => `伏笔 ${gun.name}（${gun.status}）：${gun.description}`),
@@ -153,6 +160,8 @@ export class StorySystemService {
         title: '长期语义记忆',
         priority: 'high',
         source: 'Character,LoreEntry',
+        reason: '角色、设定和素材为模型提供长期一致性约束。',
+        budget: 1000,
         items: [
           ...characters.slice(0, 12).map((character: any) => `${character.name}：${character.role || '未设定'}；目标 ${character.goals || '未设定'}；缺陷 ${character.flaws || '未设定'}`),
           ...loreEntries.slice(0, 12).map((entry: any) => `${entry.name}：${entry.description}`),
@@ -163,6 +172,8 @@ export class StorySystemService {
         title: '硬约束与审查重点',
         priority: 'critical',
         source: 'ReviewContract',
+        reason: '禁区和审查重点必须作为生成约束进入 prompt。',
+        budget: 700,
         items: [
           ...this.asArray(chapterBrief?.chapterDirective?.forbiddenZones).map((item) => `禁区：${item}`),
           ...this.asArray(reviewContract?.blockingRules).map((item) => `阻断规则：${item}`),
@@ -173,8 +184,8 @@ export class StorySystemService {
       ...section,
       tokenEstimate: this.estimateTokens(section.items.join('\n')),
     }))
+    const sections = this.applySectionBudgets(rawSections, warnings)
 
-    const warnings = []
     if (!chapterBrief) warnings.push('缺少 CHAPTER_BRIEF 合同，ContextPack 已降级')
     if (!reviewContract) warnings.push('缺少 REVIEW_CONTRACT 合同，审查重点不完整')
 
@@ -474,7 +485,7 @@ ${dto.content}`
     const chapterDirective = contractMap.CHAPTER_BRIEF?.chapterDirective || {}
     const reviewContract = contractMap.REVIEW_CONTRACT || {}
     const reviewResult = dto.reviewResult || { issues: [] }
-    const extractionResult = dto.extractionResult || {}
+    const extractionResult = await this.enrichExtractionResult(projectId, dto.content, dto.extractionResult || {})
     const mustCoverNodes = this.asArray(chapterDirective.mustCoverNodes)
     const forbiddenZones = [
       ...this.asArray(chapterDirective.forbiddenZones),
@@ -503,6 +514,7 @@ ${dto.content}`
       summary: status === 'ACCEPTED' ? 'DONE' : 'SKIPPED',
       event: status === 'ACCEPTED' ? 'DONE' : 'SKIPPED',
       state: status === 'ACCEPTED' ? 'DONE' : 'SKIPPED',
+      world: status === 'ACCEPTED' ? 'DONE' : 'SKIPPED',
       openLoop: status === 'ACCEPTED' ? 'DONE' : 'SKIPPED',
       graph: status === 'ACCEPTED' ? 'DONE' : 'SKIPPED',
       vector: 'SKIPPED',
@@ -529,7 +541,21 @@ ${dto.content}`
     })
 
     if (status === 'ACCEPTED') {
-      await this.applyAcceptedProjections(projectId, chapterId, commit.id, summaryText, extractionResult)
+      const finalProjectionStatus = await this.applyAcceptedProjections(
+        projectId,
+        chapterId,
+        commit.id,
+        summaryText,
+        extractionResult,
+        projectionStatus,
+      )
+      if (JSON.stringify(finalProjectionStatus) !== commit.projectionStatus) {
+        await this.prisma.chapterCommit.update({
+          where: { id: commit.id },
+          data: { projectionStatus: JSON.stringify(finalProjectionStatus) },
+        })
+        return { ...commit, projectionStatus: JSON.stringify(finalProjectionStatus) }
+      }
     } else {
       return this.createRejectedCommitWorkflow(projectId, chapterId, commit, normalizedIssues)
     }
@@ -547,11 +573,19 @@ ${dto.content}`
     ]
     const issues = forbiddenZones
       .filter((zone) => zone && text.includes(zone))
-      .map((zone) => ({
-        severity: 'CRITICAL',
-        blocking: true,
-        message: `命中本章禁区：${zone}`,
-      }))
+      .map((zone) => {
+        const startOffset = text.indexOf(zone)
+        return {
+          category: 'CONTINUITY',
+          severity: 'CRITICAL',
+          blocking: true,
+          message: `命中本章禁区：${zone}`,
+          evidence: zone,
+          suggestion: '删除或改写该片段，保留悬念和铺垫。',
+          startOffset,
+          endOffset: startOffset + zone.length,
+        }
+      })
     return { issues, blockingCount: issues.length }
   }
 
@@ -637,11 +671,46 @@ ${dto.content}`
     })
   }
 
+  async dismissRepairPlan(
+    userId: string,
+    projectId: string,
+    chapterId: string,
+    repairPlanId: string,
+    dto: { overrideReason: string },
+  ) {
+    await this.loadProjectChapter(userId, projectId, chapterId)
+    const reason = dto.overrideReason?.trim()
+    if (!reason) {
+      throw new BadRequestException('忽略修复计划必须填写原因')
+    }
+    const repairPlan = await this.prisma.repairPlan.findFirst({
+      where: { id: repairPlanId, projectId, chapterId, status: 'OPEN' },
+    })
+    if (!repairPlan) {
+      throw new NotFoundException('没有可忽略的修复计划')
+    }
+    return this.prisma.repairPlan.update({
+      where: { id: repairPlanId },
+      data: {
+        status: 'DISMISSED',
+        overrideReason: reason,
+      },
+    })
+  }
+
   async listOpenLoops(userId: string, projectId: string) {
     await this.loadProject(userId, projectId)
     return this.prisma.openLoop.findMany({
       where: { projectId },
       orderBy: { updatedAt: 'desc' },
+    })
+  }
+
+  async listWorldFacts(userId: string, projectId: string) {
+    await this.loadProject(userId, projectId)
+    return this.prisma.worldStateFact.findMany({
+      where: { projectId },
+      orderBy: { createdAt: 'desc' },
     })
   }
 
@@ -761,6 +830,64 @@ ${this.chapterText(chapter)}`
       stateDeltas: [],
       entityDeltas: [],
       summaryText: this.buildFallbackSummary(content),
+    }
+  }
+
+  private async enrichExtractionResult(projectId: string, content: string, provided: any) {
+    const fallback = this.extractChapterFacts(content)
+    const [characters, loreEntries, chekhovsGuns] = await Promise.all([
+      this.prisma.character.findMany({ where: { projectId } }),
+      this.prisma.loreEntry.findMany({ where: { projectId, isActive: true } }),
+      this.prisma.chekhovsGun.findMany({ where: { projectId } }),
+    ])
+    const mentionedCharacters = characters.filter((character: any) => character.name && content.includes(character.name))
+    const mentionedLore = loreEntries.filter((entry: any) => entry.name && content.includes(entry.name))
+    const mentionedOpenLoops = chekhovsGuns.filter(
+      (gun: any) => gun.name && gun.status !== 'PAYOFF' && content.includes(gun.name),
+    )
+
+    const inferredEntities = [
+      ...mentionedCharacters.map((character: any) => ({
+        name: character.name,
+        type: 'CHARACTER',
+        role: character.role,
+      })),
+      ...mentionedLore.map((entry: any) => ({
+        name: entry.name,
+        type: entry.category || 'CONCEPT',
+        description: entry.description,
+      })),
+      ...mentionedOpenLoops.map((gun: any) => ({
+        name: gun.name,
+        type: 'CLUE',
+        description: gun.description,
+      })),
+    ]
+
+    return {
+      ...provided,
+      acceptedEvents: this.asArray(provided.acceptedEvents).length
+        ? provided.acceptedEvents
+        : fallback.acceptedEvents,
+      stateDeltas: this.asArray(provided.stateDeltas).length
+        ? provided.stateDeltas
+        : mentionedCharacters.map((character: any) => ({
+            characterName: character.name,
+            field: 'presence',
+            value: 'appears in accepted chapter commit',
+          })),
+      entityDeltas: this.asArray(provided.entityDeltas),
+      openLoops: this.asArray(provided.openLoops).length
+        ? provided.openLoops
+        : mentionedOpenLoops.map((gun: any) => ({
+            key: gun.name,
+            title: gun.name,
+            status: gun.status || 'OPEN',
+            description: gun.description,
+          })),
+      entities: this.asArray(provided.entities).length ? provided.entities : inferredEntities,
+      relations: this.asArray(provided.relations),
+      summaryText: provided.summaryText || fallback.summaryText,
     }
   }
 
@@ -1053,130 +1180,206 @@ ${this.chapterText(chapter)}`
     commitId: string,
     summaryText: string,
     extractionResult: any,
+    initialStatus?: any,
   ) {
-    await this.prisma.chapterSummary.create({
-      data: {
-        chapterId,
-        summary: summaryText,
-      },
-    })
-    await this.prisma.chapter.update({
-      where: { id: chapterId },
-      data: {
-        summary: summaryText,
-        status: 'COMMITTED',
-      },
-    })
+    const projectionStatus = {
+      summary: 'SKIPPED',
+      event: 'SKIPPED',
+      state: 'SKIPPED',
+      world: 'SKIPPED',
+      openLoop: 'SKIPPED',
+      graph: 'SKIPPED',
+      vector: 'SKIPPED',
+      ...initialStatus,
+    }
+
+    try {
+      await this.prisma.chapterSummary.create({
+        data: {
+          chapterId,
+          summary: summaryText,
+        },
+      })
+      await this.prisma.chapter.update({
+        where: { id: chapterId },
+        data: {
+          summary: summaryText,
+          status: 'COMMITTED',
+        },
+      })
+      projectionStatus.summary = 'DONE'
+    } catch (error: any) {
+      projectionStatus.summary = 'FAILED'
+      projectionStatus.event = 'SKIPPED'
+      projectionStatus.state = 'SKIPPED'
+      projectionStatus.world = 'SKIPPED'
+      projectionStatus.openLoop = 'SKIPPED'
+      projectionStatus.graph = 'SKIPPED'
+      projectionStatus.error = error.message
+      return projectionStatus
+    }
 
     const acceptedEvents = this.asArray(extractionResult.acceptedEvents)
     if (acceptedEvents.length) {
-      await this.prisma.storyEvent.createMany({
-        data: acceptedEvents.map((event: any) => ({
-          projectId,
-          chapterId,
-          commitId,
-          eventType: event.eventType || event.type || 'CHAPTER_EVENT',
-          subject: event.subject || 'chapter',
-          payload: JSON.stringify(event.payload || event),
-        })),
-      })
+      try {
+        await this.prisma.storyEvent.createMany({
+          data: acceptedEvents.map((event: any) => ({
+            projectId,
+            chapterId,
+            commitId,
+            eventType: event.eventType || event.type || 'CHAPTER_EVENT',
+            subject: event.subject || 'chapter',
+            payload: JSON.stringify(event.payload || event),
+          })),
+        })
+        projectionStatus.event = 'DONE'
+      } catch (error: any) {
+        projectionStatus.event = 'FAILED'
+        projectionStatus.eventError = error.message
+      }
     }
 
     const stateDeltas = this.asArray(extractionResult.stateDeltas)
     if (stateDeltas.length) {
-      await this.prisma.characterState.createMany({
-        data: stateDeltas.map((delta: any) => ({
-          projectId,
-          chapterId,
-          commitId,
-          characterName: delta.characterName || delta.entity || delta.name || '未知角色',
-          field: delta.field || 'state',
-          value: String(delta.value ?? delta.description ?? ''),
-        })),
-      })
+      try {
+        await this.prisma.characterState.createMany({
+          data: stateDeltas.map((delta: any) => ({
+            projectId,
+            chapterId,
+            commitId,
+            characterName: delta.characterName || delta.entity || delta.name || '未知角色',
+            field: delta.field || 'state',
+            value: String(delta.value ?? delta.description ?? ''),
+          })),
+        })
+        projectionStatus.state = 'DONE'
+      } catch (error: any) {
+        projectionStatus.state = 'FAILED'
+        projectionStatus.stateError = error.message
+      }
+    }
+
+    const worldFacts = this.asArray(extractionResult.worldFacts)
+    if (worldFacts.length) {
+      try {
+        await this.prisma.worldStateFact.createMany({
+          data: worldFacts.map((fact: any) => ({
+            projectId,
+            chapterId,
+            commitId,
+            key: fact.key || fact.name || fact.category || 'world_fact',
+            category: fact.category || 'FACT',
+            value: String(fact.value ?? fact.description ?? ''),
+            source: fact.source,
+          })),
+        })
+        projectionStatus.world = 'DONE'
+      } catch (error: any) {
+        projectionStatus.world = 'FAILED'
+        projectionStatus.worldError = error.message
+      }
     }
 
     for (const loop of this.asArray(extractionResult.openLoops)) {
       const key = loop.key || loop.title
       if (!key) continue
-      await this.prisma.openLoop.upsert({
-        where: { projectId_key: { projectId, key } },
-        create: {
-          projectId,
-          chapterId,
-          commitId,
-          key,
-          title: loop.title || key,
-          status: loop.status || 'OPEN',
-          payload: JSON.stringify(loop),
-        },
-        update: {
-          chapterId,
-          commitId,
-          title: loop.title || key,
-          status: loop.status || 'OPEN',
-          payload: JSON.stringify(loop),
-        },
-      })
+      try {
+        await this.prisma.openLoop.upsert({
+          where: { projectId_key: { projectId, key } },
+          create: {
+            projectId,
+            chapterId,
+            commitId,
+            key,
+            title: loop.title || key,
+            status: loop.status || 'OPEN',
+            payload: JSON.stringify(loop),
+          },
+          update: {
+            chapterId,
+            commitId,
+            title: loop.title || key,
+            status: loop.status || 'OPEN',
+            payload: JSON.stringify(loop),
+          },
+        })
+        projectionStatus.openLoop = 'DONE'
+      } catch (error: any) {
+        projectionStatus.openLoop = 'FAILED'
+        projectionStatus.openLoopError = error.message
+      }
     }
 
     const entityByName = new Map<string, any>()
     for (const entity of this.asArray(extractionResult.entities)) {
       if (!entity.name) continue
-      const saved = await this.prisma.storyEntity.upsert({
-        where: { projectId_name: { projectId, name: entity.name } },
-        create: {
-          projectId,
-          name: entity.name,
-          type: entity.type || 'CONCEPT',
-          aliases: entity.aliases ? JSON.stringify(entity.aliases) : undefined,
-          payload: JSON.stringify(entity),
-        },
-        update: {
-          type: entity.type || 'CONCEPT',
-          aliases: entity.aliases ? JSON.stringify(entity.aliases) : undefined,
-          payload: JSON.stringify(entity),
-        },
-      })
-      entityByName.set(entity.name, saved)
+      try {
+        const saved = await this.prisma.storyEntity.upsert({
+          where: { projectId_name: { projectId, name: entity.name } },
+          create: {
+            projectId,
+            name: entity.name,
+            type: entity.type || 'CONCEPT',
+            aliases: entity.aliases ? JSON.stringify(entity.aliases) : undefined,
+            payload: JSON.stringify(entity),
+          },
+          update: {
+            type: entity.type || 'CONCEPT',
+            aliases: entity.aliases ? JSON.stringify(entity.aliases) : undefined,
+            payload: JSON.stringify(entity),
+          },
+        })
+        entityByName.set(entity.name, saved)
+      } catch (error: any) {
+        projectionStatus.graph = 'FAILED'
+        projectionStatus.graphError = error.message
+      }
     }
-    if (entityByName.size) {
-      await this.prisma.entityMention.createMany({
-        data: [...entityByName.values()].map((entity) => ({
-          projectId,
-          entityId: entity.id,
-          chapterId,
-          commitId,
-          excerpt: summaryText,
-        })),
-      })
+    if (entityByName.size && projectionStatus.graph !== 'FAILED') {
+      try {
+        await this.prisma.entityMention.createMany({
+          data: [...entityByName.values()].map((entity) => ({
+            projectId,
+            entityId: entity.id,
+            chapterId,
+            commitId,
+            excerpt: summaryText,
+          })),
+        })
+
+        for (const relation of this.asArray(extractionResult.relations)) {
+          const from = entityByName.get(relation.from)
+          const to = entityByName.get(relation.to)
+          if (!from || !to || !relation.type) continue
+          await this.prisma.storyRelation.upsert({
+            where: {
+              projectId_fromEntityId_toEntityId_type: {
+                projectId,
+                fromEntityId: from.id,
+                toEntityId: to.id,
+                type: relation.type,
+              },
+            },
+            create: {
+              projectId,
+              fromEntityId: from.id,
+              toEntityId: to.id,
+              type: relation.type,
+              description: relation.description,
+            },
+            update: {
+              description: relation.description,
+            },
+          })
+        }
+        projectionStatus.graph = 'DONE'
+      } catch (error: any) {
+        projectionStatus.graph = 'FAILED'
+        projectionStatus.graphError = error.message
+      }
     }
 
-    for (const relation of this.asArray(extractionResult.relations)) {
-      const from = entityByName.get(relation.from)
-      const to = entityByName.get(relation.to)
-      if (!from || !to || !relation.type) continue
-      await this.prisma.storyRelation.upsert({
-        where: {
-          projectId_fromEntityId_toEntityId_type: {
-            projectId,
-            fromEntityId: from.id,
-            toEntityId: to.id,
-            type: relation.type,
-          },
-        },
-        create: {
-          projectId,
-          fromEntityId: from.id,
-          toEntityId: to.id,
-          type: relation.type,
-          description: relation.description,
-        },
-        update: {
-          description: relation.description,
-        },
-      })
-    }
+    return projectionStatus
   }
 
   private buildMainlineWritePrompt(contextPack: any, currentContent: string, instruction?: string) {
@@ -1207,6 +1410,34 @@ ${currentContent || '暂无正文'}
 
   private estimateTokens(text: string) {
     return Math.ceil(text.length / 2)
+  }
+
+  private applySectionBudgets(sections: any[], warnings: string[]) {
+    return sections.map((section) => {
+      const budget = section.budget || section.tokenEstimate
+      const items = [...(section.items || [])]
+      const trimmedItems: string[] = []
+      let tokenEstimate = this.estimateTokens(items.join('\n'))
+
+      while (items.length > 0 && tokenEstimate > budget) {
+        const removed = items.pop()
+        if (removed) trimmedItems.unshift(removed)
+        tokenEstimate = this.estimateTokens(items.join('\n'))
+      }
+
+      if (trimmedItems.length > 0) {
+        warnings.push(
+          `ContextPack ${section.layer} trimmed ${trimmedItems.length} item(s) to fit ${budget} tokens`,
+        )
+      }
+
+      return {
+        ...section,
+        items,
+        budget,
+        tokenEstimate,
+      }
+    })
   }
 
   private truncate(text: string, max: number) {

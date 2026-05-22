@@ -67,6 +67,10 @@ export class StoryExtractionResultDto {
 
   @IsArray()
   @IsOptional()
+  worldFacts?: unknown[]
+
+  @IsArray()
+  @IsOptional()
   entityDeltas?: unknown[]
 
   @IsArray()
@@ -97,6 +101,11 @@ export class RepairChapterDto {
   @IsString()
   @IsOptional()
   repairPlanId?: string
+}
+
+export class DismissRepairPlanDto {
+  @IsString()
+  overrideReason!: string
 }
 
 export class CreateChapterCommitDto {

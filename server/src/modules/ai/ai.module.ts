@@ -12,6 +12,7 @@ import { ApiKeysModule } from '../api-keys/api-keys.module'
 import { AIConfigModule } from '../ai-config/ai-config.module'
 import { WritingStylesModule } from '../writing-styles/writing-styles.module'
 import { CharactersModule } from '../characters/characters.module'
+import { StorySystemModule } from '../story-system/story-system.module'
 
 @Module({
   imports: [
@@ -21,6 +22,7 @@ import { CharactersModule } from '../characters/characters.module'
     AIConfigModule,
     WritingStylesModule,
     forwardRef(() => CharactersModule),
+    forwardRef(() => StorySystemModule),
   ],
   controllers: [AiController],
   providers: [AiService, ContextBuilderService, OpenaiProvider, ClaudeProvider, DeepseekProvider, MimoProvider],

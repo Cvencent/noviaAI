@@ -4,6 +4,10 @@ export class CompleteDto {
   @IsString()
   projectId: string
 
+  @IsOptional()
+  @IsString()
+  chapterId?: string
+
   @IsString()
   content: string
 

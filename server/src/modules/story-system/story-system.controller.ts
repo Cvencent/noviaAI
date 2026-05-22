@@ -5,6 +5,7 @@ import { StorySystemService } from './story-system.service'
 import {
   ContinueStoryAgentRunDto,
   CreateChapterCommitDto,
+  DismissRepairPlanDto,
   RepairChapterDto,
   StartStoryAgentRunDto,
   WriteChapterDto,
@@ -118,6 +119,17 @@ export class StorySystemController {
     return this.storySystemService.listRepairPlans(user.id, projectId, chapterId)
   }
 
+  @Post('chapters/:chapterId/story-system/repair-plans/:repairPlanId/dismiss')
+  dismissRepairPlan(
+    @CurrentUser() user: any,
+    @Param('projectId') projectId: string,
+    @Param('chapterId') chapterId: string,
+    @Param('repairPlanId') repairPlanId: string,
+    @Body() dto: DismissRepairPlanDto,
+  ) {
+    return this.storySystemService.dismissRepairPlan(user.id, projectId, chapterId, repairPlanId, dto)
+  }
+
   @Get('story-graph/entities')
   listGraphEntities(
     @CurrentUser() user: any,
@@ -141,6 +153,14 @@ export class StorySystemController {
     @Param('projectId') projectId: string,
   ) {
     return this.storySystemService.listOpenLoops(user.id, projectId)
+  }
+
+  @Get('story-graph/world-facts')
+  listWorldFacts(
+    @CurrentUser() user: any,
+    @Param('projectId') projectId: string,
+  ) {
+    return this.storySystemService.listWorldFacts(user.id, projectId)
   }
 
   @Get('story-graph/path')

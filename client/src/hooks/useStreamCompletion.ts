@@ -4,6 +4,7 @@ import { useAuthStore } from '../store/auth'
 
 interface StreamParams {
   projectId: string
+  chapterId?: string
   content: string
   provider?: 'openai' | 'claude' | 'deepseek' | 'mimo'
   model?: string

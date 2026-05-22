@@ -13,7 +13,9 @@ export interface StoryContextSection {
   title: string
   priority: 'critical' | 'high' | 'medium' | 'low'
   source: string
+  reason: string
   items: string[]
+  budget: number
   tokenEstimate: number
 }
 
@@ -101,6 +103,7 @@ export interface RepairPlan {
   status: string
   steps: string
   targetRanges?: string
+  overrideReason?: string
   createdAt: string
 }
 
@@ -111,6 +114,16 @@ export interface OpenLoop {
   status: string
   payload?: string
   updatedAt: string
+}
+
+export interface WorldStateFact {
+  id: string
+  key: string
+  category: string
+  value: string
+  source?: string
+  commitId: string
+  createdAt: string
 }
 
 export interface StoryEntity {
@@ -206,6 +219,7 @@ export const storySystemApi = {
       acceptedEvents?: unknown[]
       stateDeltas?: unknown[]
       entityDeltas?: unknown[]
+      worldFacts?: unknown[]
       openLoops?: unknown[]
       entities?: unknown[]
       relations?: unknown[]
@@ -233,8 +247,23 @@ export const storySystemApi = {
     return response.data
   },
 
+  async dismissRepairPlan(projectId: string, chapterId: string, repairPlanId: string, data: {
+    overrideReason: string
+  }): Promise<RepairPlan> {
+    const response = await apiClient.post(
+      `/projects/${projectId}/chapters/${chapterId}/story-system/repair-plans/${repairPlanId}/dismiss`,
+      data,
+    )
+    return response.data
+  },
+
   async listOpenLoops(projectId: string): Promise<OpenLoop[]> {
     const response = await apiClient.get(`/projects/${projectId}/story-graph/open-loops`)
+    return response.data
+  },
+
+  async listWorldFacts(projectId: string): Promise<WorldStateFact[]> {
+    const response = await apiClient.get(`/projects/${projectId}/story-graph/world-facts`)
     return response.data
   },
 

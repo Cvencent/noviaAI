@@ -12,16 +12,19 @@ import {
 } from 'lucide-react'
 import { Button } from './ui/Button'
 import { Textarea } from './ui/Textarea'
+import { DiffViewer } from './DiffViewer'
 import {
   ChapterCommit,
   OpenLoop,
   RepairPlan,
+  ReviewIssue,
   ReviewReport,
   StoryAgentRun,
   StoryContextPack,
   StoryEntity,
   StoryPreflightResult,
   StoryRuntimeHealth,
+  WorldStateFact,
   storySystemApi,
 } from '../api/story-system'
 
@@ -29,6 +32,8 @@ interface StorySystemPanelProps {
   projectId: string
   chapterId: string
   content: string
+  onHighlightIssues?: (issues: ReviewIssue[]) => void
+  onApplyRepair?: (text: string) => void
   onClose: () => void
 }
 
@@ -55,7 +60,18 @@ function statusLabel(status?: string) {
   return labels[status || ''] || status || '未知'
 }
 
-export function StorySystemPanel({ projectId, chapterId, content, onClose }: StorySystemPanelProps) {
+function plainText(value: string) {
+  return value.replace(/<[^>]*>/g, '').replace(/\s+/g, ' ').trim()
+}
+
+export function StorySystemPanel({
+  projectId,
+  chapterId,
+  content,
+  onHighlightIssues,
+  onApplyRepair,
+  onClose,
+}: StorySystemPanelProps) {
   const [health, setHealth] = useState<StoryRuntimeHealth | null>(null)
   const [preflight, setPreflight] = useState<StoryPreflightResult | null>(null)
   const [contextPack, setContextPack] = useState<StoryContextPack | null>(null)
@@ -63,14 +79,23 @@ export function StorySystemPanel({ projectId, chapterId, content, onClose }: Sto
   const [reviewReports, setReviewReports] = useState<ReviewReport[]>([])
   const [repairPlans, setRepairPlans] = useState<RepairPlan[]>([])
   const [openLoops, setOpenLoops] = useState<OpenLoop[]>([])
+  const [worldFacts, setWorldFacts] = useState<WorldStateFact[]>([])
   const [graphEntities, setGraphEntities] = useState<StoryEntity[]>([])
   const [run, setRun] = useState<StoryAgentRun | null>(null)
   const [instruction, setInstruction] = useState('')
   const [repairPreview, setRepairPreview] = useState('')
+  const [overrideReasons, setOverrideReasons] = useState<Record<string, string>>({})
   const [isBusy, setIsBusy] = useState(false)
   const [message, setMessage] = useState('')
 
   const latestCommit = commits[0]
+  const latestAcceptedCommit = useMemo(
+    () => commits.find((commit) => commit.status === 'ACCEPTED'),
+    [commits],
+  )
+  const latestAcceptedText = latestAcceptedCommit ? plainText(latestAcceptedCommit.contentSnapshot) : ''
+  const currentText = plainText(content)
+  const hasCommitDiff = Boolean(latestAcceptedText && currentText && latestAcceptedText !== currentText)
   const runDraft = useMemo(() => {
     const draft = run?.steps?.find((step) => step.stepType === 'DRAFT')
     const payload = parseJson(draft?.output)
@@ -82,12 +107,13 @@ export function StorySystemPanel({ projectId, chapterId, content, onClose }: Sto
   }, [projectId, chapterId])
 
   const loadStatus = async () => {
-    const [healthData, commitData, reportData, repairData, loopData, entityData] = await Promise.all([
+    const [healthData, commitData, reportData, repairData, loopData, factData, entityData] = await Promise.all([
       storySystemApi.health(projectId, chapterId).catch(() => null),
       storySystemApi.listCommits(projectId, chapterId).catch(() => []),
       storySystemApi.listReviewReports(projectId, chapterId).catch(() => []),
       storySystemApi.listRepairPlans(projectId, chapterId).catch(() => []),
       storySystemApi.listOpenLoops(projectId).catch(() => []),
+      storySystemApi.listWorldFacts(projectId).catch(() => []),
       storySystemApi.listGraphEntities(projectId).catch(() => []),
     ])
     setHealth(healthData)
@@ -95,6 +121,7 @@ export function StorySystemPanel({ projectId, chapterId, content, onClose }: Sto
     setReviewReports(reportData)
     setRepairPlans(repairData)
     setOpenLoops(loopData)
+    setWorldFacts(factData)
     setGraphEntities(entityData)
   }
 
@@ -151,6 +178,7 @@ export function StorySystemPanel({ projectId, chapterId, content, onClose }: Sto
 
   const reviewCurrent = () => runAction('章节审查', async () => {
     const result = await storySystemApi.review(projectId, chapterId, content)
+    onHighlightIssues?.(result.issues || [])
     setPreflight({
       chapterId,
       blocking: result.blockingCount > 0,
@@ -185,6 +213,31 @@ export function StorySystemPanel({ projectId, chapterId, content, onClose }: Sto
     })
     setRepairPreview(result.repairedText)
     await loadStatus()
+  })
+
+  const dismissRepairPlan = (repairPlanId: string) => runAction('忽略修复计划', async () => {
+    const overrideReason = overrideReasons[repairPlanId]?.trim()
+    if (!overrideReason) {
+      setMessage('请先填写忽略原因')
+      return
+    }
+    await storySystemApi.dismissRepairPlan(projectId, chapterId, repairPlanId, { overrideReason })
+    setOverrideReasons((current) => ({ ...current, [repairPlanId]: '' }))
+    await loadStatus()
+  })
+
+  const applyRepairAndReview = () => runAction('应用修复并重审', async () => {
+    if (!repairPreview.trim()) return
+    onApplyRepair?.(repairPreview)
+    const result = await storySystemApi.review(projectId, chapterId, repairPreview)
+    onHighlightIssues?.(result.issues || [])
+    setPreflight({
+      chapterId,
+      blocking: result.blockingCount > 0,
+      blockingReasons: (result.issues || []).filter((issue: any) => issue.blocking).map((issue: any) => issue.message),
+      warnings: [],
+      missingContracts: [],
+    })
   })
 
   return (
@@ -278,6 +331,9 @@ export function StorySystemPanel({ projectId, chapterId, content, onClose }: Sto
                     {section.title} · {section.items.length}
                   </summary>
                   <div className="mt-2 space-y-1">
+                    <div className="text-xs text-gray-500">
+                      {section.reason} · {section.tokenEstimate}/{section.budget} tokens
+                    </div>
                     {section.items.slice(0, 8).map((item, index) => (
                       <div key={index} className="text-xs text-gray-600">{item}</div>
                     ))}
@@ -336,6 +392,7 @@ export function StorySystemPanel({ projectId, chapterId, content, onClose }: Sto
             <div className="text-sm font-medium text-gray-900">审查与修复</div>
             {repairPlans.slice(0, 3).map((plan) => {
               const steps = parseJson(plan.steps) || []
+              const isOpen = plan.status === 'OPEN'
               return (
                 <details key={plan.id} className="rounded-lg border border-red-100 bg-red-50 p-3">
                   <summary className="cursor-pointer text-sm font-medium text-red-800">
@@ -351,6 +408,33 @@ export function StorySystemPanel({ projectId, chapterId, content, onClose }: Sto
                     <Button variant="outline" size="sm" onClick={() => repairCurrent(plan.id)} isLoading={isBusy}>
                       生成修复候选
                     </Button>
+                    {isOpen && (
+                      <div className="space-y-2 rounded border border-red-200 bg-white/70 p-2">
+                        <Textarea
+                          value={overrideReasons[plan.id] || ''}
+                          onChange={(event) => setOverrideReasons((current) => ({
+                            ...current,
+                            [plan.id]: event.target.value,
+                          }))}
+                          rows={2}
+                          placeholder="忽略原因：会记录到修复计划中，便于后续源追踪"
+                        />
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={() => dismissRepairPlan(plan.id)}
+                          disabled={!overrideReasons[plan.id]?.trim()}
+                          isLoading={isBusy}
+                        >
+                          忽略并记录原因
+                        </Button>
+                      </div>
+                    )}
+                    {plan.status === 'DISMISSED' && plan.overrideReason && (
+                      <div className="rounded border border-gray-200 bg-white/70 p-2 text-xs text-gray-700">
+                        已忽略原因：{plan.overrideReason}
+                      </div>
+                    )}
                   </div>
                 </details>
               )
@@ -359,6 +443,11 @@ export function StorySystemPanel({ projectId, chapterId, content, onClose }: Sto
               <details className="rounded-lg border border-indigo-100 bg-indigo-50 p-3" open>
                 <summary className="cursor-pointer text-sm font-medium text-indigo-900">修复候选文本</summary>
                 <div className="mt-2 whitespace-pre-wrap text-xs text-indigo-950">{repairPreview}</div>
+                {onApplyRepair && (
+                  <Button className="mt-3" size="sm" onClick={applyRepairAndReview} isLoading={isBusy}>
+                    应用修复并重审
+                  </Button>
+                )}
               </details>
             )}
             {reviewReports.slice(0, 2).map((report) => (
@@ -380,7 +469,7 @@ export function StorySystemPanel({ projectId, chapterId, content, onClose }: Sto
           </section>
         )}
 
-        {(openLoops.length > 0 || graphEntities.length > 0) && (
+        {(openLoops.length > 0 || worldFacts.length > 0 || graphEntities.length > 0) && (
           <section className="space-y-2">
             <div className="text-sm font-medium text-gray-900">投影记忆</div>
             {openLoops.length > 0 && (
@@ -393,6 +482,23 @@ export function StorySystemPanel({ projectId, chapterId, content, onClose }: Sto
                       <span className={loop.status === 'OPEN' ? 'text-yellow-700' : 'text-green-700'}>
                         {loop.status}
                       </span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+            {worldFacts.length > 0 && (
+              <div className="rounded-lg border border-gray-200 p-3">
+                <div className="text-xs font-medium text-gray-700 mb-2">世界事实</div>
+                <div className="space-y-1">
+                  {worldFacts.slice(0, 6).map((fact) => (
+                    <div key={fact.id} className="text-xs text-gray-700">
+                      <span className="font-medium">{fact.key}</span>
+                      <span className="text-gray-500"> · {fact.category}</span>
+                      <div className="truncate">{fact.value}</div>
+                      <div className="text-gray-400">
+                        source: {fact.source || fact.commitId.slice(0, 8)}
+                      </div>
                     </div>
                   ))}
                 </div>
@@ -421,6 +527,19 @@ export function StorySystemPanel({ projectId, chapterId, content, onClose }: Sto
               提交当前正文
             </Button>
           </div>
+          {hasCommitDiff && (
+            <details className="rounded-lg border border-gray-200 p-3" open>
+              <summary className="cursor-pointer text-sm font-medium text-gray-800">
+                与最近 accepted commit 的差异
+              </summary>
+              <DiffViewer
+                original={latestAcceptedText}
+                suggested={currentText}
+                mode="words"
+                className="mt-2 max-h-48 overflow-y-auto rounded bg-gray-50 p-2 text-xs"
+              />
+            </details>
+          )}
           <div className="space-y-2">
             {commits.map((commit) => {
               const fulfillment = parseJson(commit.fulfillmentResult)

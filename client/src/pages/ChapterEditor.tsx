@@ -30,7 +30,7 @@ import { LorebookManager } from '../components/LorebookManager'
 import { ChekhovsGunManager } from '../components/ChekhovsGunManager'
 import { DialogueSandbox } from '../components/DialogueSandbox'
 import { StorySystemPanel } from '../components/StorySystemPanel'
-import { storySystemApi } from '../api/story-system'
+import { ReviewIssue, storySystemApi } from '../api/story-system'
 import { RichTextEditor, RichTextEditorHandle } from '../components/editor/RichTextEditor'
 import { ContextViewer } from '../components/ContextViewer'
 import { StreamingCursor } from '../components/StreamingCursor'
@@ -176,6 +176,24 @@ export function ChapterEditor() {
     }
   }, [])
 
+  const handleHighlightReviewIssues = useCallback((issues: ReviewIssue[]) => {
+    const diffs: DiffRange[] = issues
+      .filter((issue) => typeof issue.startOffset === 'number' && typeof issue.endOffset === 'number')
+      .map((issue, index) => ({
+        from: Math.max(0, issue.startOffset || 0),
+        to: Math.max(issue.startOffset || 0, issue.endOffset || 0),
+        type: 'issue',
+        id: `story-issue-${issue.id || index}`,
+      }))
+
+    if (diffs.length > 0) {
+      editorRef.current?.setDiffHighlights(diffs)
+      setShowDiffControls(false)
+    } else {
+      editorRef.current?.clearDiffHighlights()
+    }
+  }, [])
+
   useEffect(() => {
     const handleAiApplyChanges = (event: CustomEvent) => {
       handleApplyAiChanges(event.detail)
@@ -221,14 +239,41 @@ export function ChapterEditor() {
     if (!projectId) return
     setIsLoadingContextPreview(true)
     try {
-      const plainText = contentRef.current.replace(/<[^>]*>/g, '')
-      const preview = await aiApi.getContextPreview(projectId, {
-        chapterId: chapterId || undefined,
-        currentText: plainText || undefined,
-      })
-      setContextPreview(preview)
+      if (chapterId) {
+        const pack = await storySystemApi.buildContextPack(projectId, chapterId)
+        setContextPreview({
+          projectId,
+          chapterId,
+          sections: pack.sections.map((section) => ({
+            id: section.layer,
+            title: section.title,
+            priority: section.priority,
+            source: `${section.source} · ${section.reason}`,
+            items: section.items,
+            tokenEstimate: section.tokenEstimate,
+          })),
+          totalTokenEstimate: pack.totalTokenEstimate,
+          warnings: pack.warnings,
+        })
+      } else {
+        const plainText = contentRef.current.replace(/<[^>]*>/g, '')
+        const preview = await aiApi.getContextPreview(projectId, {
+          currentText: plainText || undefined,
+        })
+        setContextPreview(preview)
+      }
     } catch (error) {
       console.error('加载上下文预览失败:', error)
+      try {
+        const plainText = contentRef.current.replace(/<[^>]*>/g, '')
+        const preview = await aiApi.getContextPreview(projectId, {
+          chapterId: chapterId || undefined,
+          currentText: plainText || undefined,
+        })
+        setContextPreview(preview)
+      } catch (fallbackError) {
+        console.error('加载备用上下文预览失败:', fallbackError)
+      }
     } finally {
       setIsLoadingContextPreview(false)
     }
@@ -364,7 +409,7 @@ export function ChapterEditor() {
 
   const handleAiWrite = async () => {
     const originalContent = contentRef.current
-    if (!projectId || !chapterId || !originalContent.trim()) return
+    if (!projectId || !chapterId) return
 
     if (isStoryWriting) {
       return
@@ -445,6 +490,12 @@ export function ChapterEditor() {
   const handleInsertText = (newText: string) => {
     editorRef.current?.insertText(newText)
   }
+
+  const handleApplyRepairText = useCallback((newText: string) => {
+    const html = `<p>${escapeHtml(newText).replace(/\n{2,}/g, '</p><p>').replace(/\n/g, '<br>')}</p>`
+    updateContent(html)
+    setShowDiffControls(false)
+  }, [updateContent])
 
   const showQueuedWorldElements = () => {
     const shouldShowElements = showElementsAfterCharacters && extractedElements.length > 0
@@ -600,7 +651,7 @@ export function ChapterEditor() {
               variant="outline" 
               size="sm" 
               onClick={handleAiWrite}
-              disabled={isStoryWriting || !content.trim()}
+              disabled={isStoryWriting}
             >
               {isStoryWriting ? (
                 <>
@@ -802,6 +853,8 @@ export function ChapterEditor() {
               projectId={projectId}
               chapterId={chapterId}
               content={content}
+              onHighlightIssues={handleHighlightReviewIssues}
+              onApplyRepair={handleApplyRepairText}
               onClose={() => setShowStorySystemPanel(false)}
             />
           </div>

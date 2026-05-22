@@ -9,7 +9,7 @@ export interface DiffHighlightOptions {
 export interface DiffRange {
   from: number
   to: number
-  type: 'addition' | 'deletion'
+  type: 'addition' | 'deletion' | 'issue'
   id: string
 }
 
@@ -188,6 +188,13 @@ export const DiffHighlight = Extension.create<DiffHighlightOptions>({
                 decorations.push(
                   Decoration.inline(diff.from, diff.to, {
                     class: 'diff-deletion',
+                    'data-diff-id': diff.id,
+                  })
+                )
+              } else if (diff.type === 'issue') {
+                decorations.push(
+                  Decoration.inline(diff.from, diff.to, {
+                    class: 'diff-issue',
                     'data-diff-id': diff.id,
                   })
                 )

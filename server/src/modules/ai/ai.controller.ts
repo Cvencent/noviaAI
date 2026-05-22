@@ -5,6 +5,7 @@ import { CurrentUser } from '../auth/decorators/current-user.decorator'
 import { AiService } from './ai.service'
 import { ContextBuilderService } from './context-builder.service'
 import { ChatDto, ConsistencyCheckDto, ContextPreviewQueryDto, GenerateSummaryDto, CompleteDto } from './dto'
+import { StorySystemService } from '../story-system/story-system.service'
 
 @Controller('ai')
 @UseGuards(JwtAuthGuard)
@@ -12,6 +13,7 @@ export class AiController {
   constructor(
     private readonly aiService: AiService,
     private readonly contextBuilderService: ContextBuilderService,
+    private readonly storySystemService: StorySystemService,
   ) {}
 
   @Get('context-preview/:projectId')
@@ -40,6 +42,13 @@ export class AiController {
 
   @Post('text-complete')
   async textComplete(@CurrentUser() user: any, @Body() dto: CompleteDto) {
+    if (dto.chapterId) {
+      return this.storySystemService.writeChapter(user.id, dto.projectId, dto.chapterId, {
+        content: dto.content,
+        temperature: dto.temperature,
+        maxTokens: dto.maxTokens,
+      })
+    }
     return this.aiService.textComplete(user.id, dto)
   }
 
@@ -51,8 +60,21 @@ export class AiController {
     res.flushHeaders?.()
 
     try {
-      for await (const token of this.aiService.textCompleteStream(user.id, dto)) {
-        res.write(`data: ${JSON.stringify({ token })}\n\n`)
+      if (dto.chapterId) {
+        const result = await this.storySystemService.writeChapter(user.id, dto.projectId, dto.chapterId, {
+          content: dto.content,
+          temperature: dto.temperature,
+          maxTokens: dto.maxTokens,
+        })
+        if (result.blocked) {
+          res.write(`data: ${JSON.stringify({ error: result.preflight.blockingReasons.join('；') || 'Story System 预检阻断' })}\n\n`)
+        } else if (result.completion) {
+          res.write(`data: ${JSON.stringify({ token: result.completion })}\n\n`)
+        }
+      } else {
+        for await (const token of this.aiService.textCompleteStream(user.id, dto)) {
+          res.write(`data: ${JSON.stringify({ token })}\n\n`)
+        }
       }
       res.write('data: [DONE]\n\n')
     } catch (error: any) {

@@ -74,6 +74,7 @@ model Project {
   repairPlans             RepairPlan[]
   storyEvents             StoryEvent[]
   characterStates         CharacterState[]
+  worldStateFacts         WorldStateFact[]
   openLoops               OpenLoop[]
   storyEntities           StoryEntity[]
   storyRelations          StoryRelation[]
@@ -204,6 +205,7 @@ model Chapter {
   repairPlans       RepairPlan[]
   storyEvents       StoryEvent[]
   characterStates   CharacterState[]
+  worldStateFacts   WorldStateFact[]
   entityMentions    EntityMention[]
 }
 
@@ -692,6 +694,7 @@ model ChapterCommit {
   repairPlan        RepairPlan?
   storyEvents       StoryEvent[]
   characterStates   CharacterState[]
+  worldStateFacts   WorldStateFact[]
   openLoops         OpenLoop[]
   entityMentions    EntityMention[]
 
@@ -750,6 +753,7 @@ model RepairPlan {
   status       String         @default("OPEN") // OPEN, APPLIED, DISMISSED
   steps        String
   targetRanges String?
+  overrideReason String?
   createdAt    DateTime       @default(now())
   updatedAt    DateTime       @updatedAt
   project      Project        @relation(fields: [projectId], references: [id], onDelete: Cascade)
@@ -799,6 +803,27 @@ model CharacterState {
   @@index([chapterId])
   @@index([commitId])
   @@index([characterName])
+}
+
+model WorldStateFact {
+  id        String        @id @default(uuid())
+  projectId String
+  chapterId String
+  commitId  String
+  key       String
+  category  String        @default("FACT") // RULE, LOCATION, ITEM, ORGANIZATION, FACT
+  value     String
+  source    String?
+  createdAt DateTime      @default(now())
+  project   Project       @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  chapter   Chapter       @relation(fields: [chapterId], references: [id], onDelete: Cascade)
+  commit    ChapterCommit @relation(fields: [commitId], references: [id], onDelete: Cascade)
+
+  @@index([projectId])
+  @@index([chapterId])
+  @@index([commitId])
+  @@index([key])
+  @@index([category])
 }
 
 model OpenLoop {

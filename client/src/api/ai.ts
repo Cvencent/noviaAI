@@ -4,6 +4,7 @@ import type { ContextPreview } from '@/types/ai-context'
 export const aiApi = {
   async complete(params: {
     projectId: string
+    chapterId?: string
     content: string
     provider?: 'openai' | 'claude'
     model?: string
