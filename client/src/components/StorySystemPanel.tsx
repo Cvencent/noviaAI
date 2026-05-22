@@ -16,6 +16,7 @@ import { DiffViewer } from './DiffViewer'
 import {
   ChapterCommit,
   OpenLoop,
+  PublishChecklist,
   RepairPlan,
   ReviewIssue,
   ReviewReport,
@@ -27,6 +28,8 @@ import {
   WorldStateFact,
   storySystemApi,
 } from '../api/story-system'
+
+type StoryPanelTab = 'overview' | 'context' | 'agent' | 'repair' | 'commits' | 'memory' | 'publish'
 
 interface StorySystemPanelProps {
   projectId: string
@@ -81,6 +84,8 @@ export function StorySystemPanel({
   const [openLoops, setOpenLoops] = useState<OpenLoop[]>([])
   const [worldFacts, setWorldFacts] = useState<WorldStateFact[]>([])
   const [graphEntities, setGraphEntities] = useState<StoryEntity[]>([])
+  const [publishChecklist, setPublishChecklist] = useState<PublishChecklist | null>(null)
+  const [activeTab, setActiveTab] = useState<StoryPanelTab>('overview')
   const [run, setRun] = useState<StoryAgentRun | null>(null)
   const [instruction, setInstruction] = useState('')
   const [repairPreview, setRepairPreview] = useState('')
@@ -107,7 +112,7 @@ export function StorySystemPanel({
   }, [projectId, chapterId])
 
   const loadStatus = async () => {
-    const [healthData, commitData, reportData, repairData, loopData, factData, entityData] = await Promise.all([
+    const [healthData, commitData, reportData, repairData, loopData, factData, entityData, checklistData] = await Promise.all([
       storySystemApi.health(projectId, chapterId).catch(() => null),
       storySystemApi.listCommits(projectId, chapterId).catch(() => []),
       storySystemApi.listReviewReports(projectId, chapterId).catch(() => []),
@@ -115,6 +120,7 @@ export function StorySystemPanel({
       storySystemApi.listOpenLoops(projectId).catch(() => []),
       storySystemApi.listWorldFacts(projectId).catch(() => []),
       storySystemApi.listGraphEntities(projectId).catch(() => []),
+      storySystemApi.getPublishChecklist(projectId).catch(() => null),
     ])
     setHealth(healthData)
     setCommits(commitData)
@@ -123,6 +129,7 @@ export function StorySystemPanel({
     setOpenLoops(loopData)
     setWorldFacts(factData)
     setGraphEntities(entityData)
+    setPublishChecklist(checklistData)
   }
 
   const runAction = async (label: string, action: () => Promise<void>) => {
@@ -283,12 +290,37 @@ export function StorySystemPanel({
         )}
       </div>
 
+      <div className="border-b border-gray-200 px-3 py-2">
+        <div className="flex flex-wrap gap-1">
+          {[
+            ['overview', 'Overview'],
+            ['context', 'Context'],
+            ['agent', 'Agent'],
+            ['repair', 'Review'],
+            ['commits', 'Commits'],
+            ['memory', 'Memory'],
+            ['publish', 'Publish'],
+          ].map(([tab, label]) => (
+            <button
+              key={tab}
+              type="button"
+              onClick={() => setActiveTab(tab as StoryPanelTab)}
+              className={`rounded px-2 py-1 text-xs font-medium ${
+                activeTab === tab ? 'bg-indigo-50 text-indigo-700' : 'text-gray-600 hover:bg-gray-50'
+              }`}
+            >
+              {label}
+            </button>
+          ))}
+        </div>
+      </div>
+
       <div className="flex-1 overflow-y-auto p-4 space-y-4">
         {message && (
           <div className="text-sm rounded-lg border border-gray-200 bg-gray-50 px-3 py-2">{message}</div>
         )}
 
-        <section className="space-y-2">
+        {activeTab === 'overview' && <section className="space-y-2">
           <div className="text-sm font-medium text-gray-900">写作主链</div>
           <div className="grid grid-cols-2 gap-2">
             <Button variant="outline" size="sm" onClick={refreshContracts} isLoading={isBusy}>
@@ -308,9 +340,9 @@ export function StorySystemPanel({
               审查
             </Button>
           </div>
-        </section>
+        </section>}
 
-        {preflight && (
+        {activeTab === 'overview' && preflight && (
           <section className={`rounded-lg border p-3 ${preflight.blocking ? 'border-red-200 bg-red-50' : 'border-green-200 bg-green-50'}`}>
             <div className="text-sm font-medium">{preflight.blocking ? '预检阻断' : '预检通过'}</div>
             {[...preflight.blockingReasons, ...preflight.warnings].map((item, index) => (
@@ -319,7 +351,7 @@ export function StorySystemPanel({
           </section>
         )}
 
-        {contextPack && (
+        {activeTab === 'context' && contextPack && (
           <section className="space-y-2">
             <div className="text-sm font-medium text-gray-900">
               ContextPack · {contextPack.totalTokenEstimate} tokens
@@ -344,7 +376,7 @@ export function StorySystemPanel({
           </section>
         )}
 
-        <section className="space-y-2">
+        {activeTab === 'agent' && <section className="space-y-2">
           <div className="text-sm font-medium text-gray-900">Agent Loop</div>
           <Textarea
             value={instruction}
@@ -385,9 +417,9 @@ export function StorySystemPanel({
               <div className="text-xs text-gray-700 whitespace-pre-wrap mt-2">{runDraft}</div>
             </details>
           )}
-        </section>
+        </section>}
 
-        {(repairPlans.length > 0 || reviewReports.length > 0) && (
+        {activeTab === 'repair' && (repairPlans.length > 0 || reviewReports.length > 0) && (
           <section className="space-y-2">
             <div className="text-sm font-medium text-gray-900">审查与修复</div>
             {repairPlans.slice(0, 3).map((plan) => {
@@ -469,7 +501,7 @@ export function StorySystemPanel({
           </section>
         )}
 
-        {(openLoops.length > 0 || worldFacts.length > 0 || graphEntities.length > 0) && (
+        {activeTab === 'memory' && (openLoops.length > 0 || worldFacts.length > 0 || graphEntities.length > 0) && (
           <section className="space-y-2">
             <div className="text-sm font-medium text-gray-900">投影记忆</div>
             {openLoops.length > 0 && (
@@ -519,7 +551,32 @@ export function StorySystemPanel({
           </section>
         )}
 
-        <section className="space-y-2">
+        {activeTab === 'publish' && publishChecklist && (
+          <section className="space-y-2">
+            <div className="flex items-center justify-between">
+              <div className="text-sm font-medium text-gray-900">发布前检查</div>
+              <span className={publishChecklist.status === 'PASS' ? 'text-xs font-medium text-green-700' : 'text-xs font-medium text-yellow-700'}>
+                {publishChecklist.status}
+              </span>
+            </div>
+            <div className="space-y-2">
+              {publishChecklist.checks.map((check) => (
+                <div key={check.key} className="rounded-lg border border-gray-200 p-3 text-xs">
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="font-medium text-gray-800">{check.label}</span>
+                    <span className={check.status === 'PASS' ? 'text-green-700' : check.status === 'BLOCKED' ? 'text-red-700' : 'text-yellow-700'}>
+                      {check.status}
+                    </span>
+                  </div>
+                  <div className="mt-1 text-gray-600">{check.message}</div>
+                  <div className="mt-1 text-gray-400">{check.action}</div>
+                </div>
+              ))}
+            </div>
+          </section>
+        )}
+
+        {activeTab === 'commits' && <section className="space-y-2">
           <div className="flex items-center justify-between">
             <div className="text-sm font-medium text-gray-900">ChapterCommit</div>
             <Button variant="outline" size="sm" onClick={commitCurrent} isLoading={isBusy}>
@@ -577,7 +634,7 @@ export function StorySystemPanel({
             })}
             {!latestCommit && <div className="text-sm text-gray-500">还没有 ChapterCommit</div>}
           </div>
-        </section>
+        </section>}
       </div>
     </div>
   )

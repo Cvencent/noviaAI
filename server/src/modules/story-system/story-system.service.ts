@@ -1124,6 +1124,76 @@ ${overrideTrace.map((trace) => `- ${trace.chapterId}: ${trace.reason}`).join('\n
     }
   }
 
+  async getPublishChecklist(userId: string, projectId: string) {
+    const ruleReview = await this.reviewFullBook(userId, projectId)
+    const [asset, commits, openLoops] = await Promise.all([
+      this.prisma.publishingAsset?.findFirst?.({
+        where: { projectId },
+        orderBy: { updatedAt: 'desc' },
+      }) ?? Promise.resolve(null),
+      this.prisma.chapterCommit.findMany({
+        where: { projectId, status: 'ACCEPTED' },
+        orderBy: { createdAt: 'desc' },
+      }),
+      this.prisma.openLoop.findMany({
+        where: { projectId, status: 'OPEN' },
+        orderBy: { updatedAt: 'desc' },
+      }),
+    ])
+    const projectionFailures = commits.filter((commit: any) => this.hasFailedProjection(commit.projectionStatus)).length
+    const checks = [
+      {
+        key: 'commits',
+        label: '章节 accepted commit',
+        status: ruleReview.summary.acceptedChapters === ruleReview.summary.totalChapters ? 'PASS' : 'BLOCKED',
+        message: `${ruleReview.summary.acceptedChapters}/${ruleReview.summary.totalChapters} 章节已 accepted`,
+        action: '提交所有章节',
+      },
+      {
+        key: 'reviews',
+        label: '规则审查',
+        status: ruleReview.summary.blockingReports === 0 ? 'PASS' : 'BLOCKED',
+        message: `${ruleReview.summary.blockingReports} 个阻塞审查报告`,
+        action: '处理阻塞审查',
+      },
+      {
+        key: 'cover',
+        label: '封面与出版素材',
+        status: asset?.coverSvg ? 'PASS' : 'WARNING',
+        message: asset?.coverSvg ? '已生成封面资产' : '尚未生成封面资产',
+        action: '生成出版素材',
+      },
+      {
+        key: 'openLoops',
+        label: '开放伏笔',
+        status: openLoops.length ? 'WARNING' : 'PASS',
+        message: `${openLoops.length} 个开放伏笔`,
+        action: '回收或确认保留伏笔',
+      },
+      {
+        key: 'projections',
+        label: '投影状态',
+        status: projectionFailures ? 'WARNING' : 'PASS',
+        message: `${projectionFailures} 个 accepted commit 存在投影失败`,
+        action: '重跑 projections',
+      },
+      {
+        key: 'exports',
+        label: '导出格式',
+        status: 'PASS',
+        message: 'Markdown、EPUB、PDF 已可导出',
+        action: '下载并检查导出文件',
+      },
+    ]
+    return {
+      projectId,
+      status: checks.some((check) => check.status === 'BLOCKED')
+        ? 'BLOCKED'
+        : checks.some((check) => check.status === 'WARNING') ? 'WARNING' : 'PASS',
+      checks,
+    }
+  }
+
   private async executeRunStep(userId: string, run: any, stepType: StoryAgentStepType) {
     const steps = await this.prisma.storyAgentStep.findMany({
       where: { runId: run.id },

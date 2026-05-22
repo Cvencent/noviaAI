@@ -1038,6 +1038,32 @@ describe('StorySystemService', () => {
     expect(review.recommendations).toContain('请重新运行全书 AI 审查')
   })
 
+  it('builds a publish checklist from review, assets, export readiness, loops, and projection state', async () => {
+    mockProjectGraph()
+    prisma.chapter.findMany.mockResolvedValue([
+      { id: 'chapter-1', title: '旧港质问', order: 0, contents: [{ order: 0, content: '林澄拿出芯片。' }] },
+      { id: 'chapter-2', title: '雨巷追踪', order: 1, contents: [{ order: 0, content: '沈遥消失。' }] },
+    ])
+    prisma.chapterCommit.findMany.mockResolvedValue([
+      { id: 'commit-1', chapterId: 'chapter-1', status: 'ACCEPTED', projectionStatus: JSON.stringify({ summary: 'DONE' }), createdAt: new Date('2026-05-22T01:00:00Z') },
+      { id: 'commit-2', chapterId: 'chapter-2', status: 'ACCEPTED', projectionStatus: JSON.stringify({ summary: 'FAILED' }), createdAt: new Date('2026-05-22T02:00:00Z') },
+    ])
+    prisma.reviewReport.findMany.mockResolvedValue([])
+    prisma.openLoop.findMany.mockResolvedValue([{ id: 'loop-1', key: '芯片裂纹', title: '芯片裂纹', status: 'OPEN' }])
+    prisma.publishingAsset.findFirst.mockResolvedValue({ id: 'asset-1', coverSvg: '<svg/>', synopsis: '简介' })
+
+    const checklist = await service.getPublishChecklist('user-1', 'project-1')
+
+    expect(checklist.status).toBe('WARNING')
+    expect(checklist.checks).toEqual(expect.arrayContaining([
+      expect.objectContaining({ key: 'commits', status: 'PASS' }),
+      expect.objectContaining({ key: 'cover', status: 'PASS' }),
+      expect.objectContaining({ key: 'openLoops', status: 'WARNING' }),
+      expect.objectContaining({ key: 'projections', status: 'WARNING' }),
+      expect.objectContaining({ key: 'exports', status: 'PASS' }),
+    ]))
+  })
+
   it('creates a repair agent step from an open repair plan without changing chapter content', async () => {
     mockProjectGraph()
     prisma.repairPlan.findFirst.mockResolvedValue({

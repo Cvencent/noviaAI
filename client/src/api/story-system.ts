@@ -209,6 +209,18 @@ export interface FullBookAiReview {
   overrideTrace?: Array<{ repairPlanId: string; chapterId: string; reason: string }>
 }
 
+export interface PublishChecklist {
+  projectId: string
+  status: 'PASS' | 'WARNING' | 'BLOCKED' | string
+  checks: Array<{
+    key: string
+    label: string
+    status: 'PASS' | 'WARNING' | 'BLOCKED' | string
+    message: string
+    action: string
+  }>
+}
+
 export const storySystemApi = {
   async refreshContracts(projectId: string, chapterId: string): Promise<{ contracts: StoryContract[] }> {
     const response = await apiClient.post(
@@ -332,6 +344,13 @@ export const storySystemApi = {
     return response.data
   },
 
+  async findGraphPath(projectId: string, from: string, to: string): Promise<{ from: StoryEntity | null; to: StoryEntity | null; relations: unknown[] }> {
+    const response = await apiClient.get(`/projects/${projectId}/story-graph/path`, {
+      params: { from, to },
+    })
+    return response.data
+  },
+
   async reviewFullBook(projectId: string): Promise<FullBookReview> {
     const response = await apiClient.get(`/projects/${projectId}/story-system/full-book-review`)
     return response.data
@@ -349,6 +368,11 @@ export const storySystemApi = {
 
   async reviewFullBookWithAi(projectId: string, data: { focus?: 'ALL' | 'STRUCTURE' | 'STYLE' | string } = {}): Promise<FullBookAiReview> {
     const response = await apiClient.post(`/projects/${projectId}/story-system/full-book-ai-review`, data)
+    return response.data
+  },
+
+  async getPublishChecklist(projectId: string): Promise<PublishChecklist> {
+    const response = await apiClient.get(`/projects/${projectId}/story-system/publish-checklist`)
     return response.data
   },
 

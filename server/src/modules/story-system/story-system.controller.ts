@@ -219,6 +219,14 @@ export class StorySystemController {
     return this.storySystemService.reviewFullBookWithAi(user.id, projectId, dto)
   }
 
+  @Get('story-system/publish-checklist')
+  getPublishChecklist(
+    @CurrentUser() user: any,
+    @Param('projectId') projectId: string,
+  ) {
+    return this.storySystemService.getPublishChecklist(user.id, projectId)
+  }
+
   @Post('chapters/:chapterId/story-system/agent-runs')
   startRun(
     @CurrentUser() user: any,

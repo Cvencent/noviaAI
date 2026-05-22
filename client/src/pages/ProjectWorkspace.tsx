@@ -19,6 +19,7 @@ import {
   Zap,
   Calendar,
   LineChart,
+  Network,
 } from 'lucide-react'
 import { Button } from '@/components/ui/Button'
 import { projectsApi } from '@/api/projects'
@@ -71,6 +72,7 @@ export const ProjectWorkspace = () => {
     { path: 'chapters', icon: FileText, label: '章节' },
     { path: 'consistency-check', icon: Shield, label: '一致性检查' },
     { path: 'reader-experience', icon: LineChart, label: '读者体验' },
+    { path: 'story-graph', icon: Network, label: 'Story Graph' },
     { path: 'usage-logs', icon: Activity, label: '使用日志' },
   ]
 
