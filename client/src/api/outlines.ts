@@ -39,6 +39,23 @@ export interface CreateOutlineDto {
   order?: number
 }
 
+export interface GenerateOutlineDto {
+  premise?: string
+  structureTemplate?: 'THREE_ACT' | 'HERO_JOURNEY' | 'KISHOTENKETSU' | 'SAVE_THE_CAT' | 'SEVEN_POINT'
+  chapterCount?: number
+  targetWords?: number
+}
+
+export interface StructureHealthReport {
+  outlineId: string
+  templateId: string
+  coverageScore: number
+  pacingScore: number
+  missingBeats: string[]
+  overloadedBeats: string[]
+  suggestions: string[]
+}
+
 export interface UpdateOutlineDto {
   title?: string
   description?: string
@@ -88,6 +105,18 @@ export const outlinesApi = {
 
   async create(projectId: string, data: CreateOutlineDto): Promise<Outline> {
     const response = await apiClient.post(`/projects/${projectId}/outlines`, data)
+    return response.data
+  },
+
+  async generateWithAi(projectId: string, data: GenerateOutlineDto): Promise<Outline> {
+    const response = await apiClient.post(`/projects/${projectId}/outlines/ai-generate`, data)
+    return response.data
+  },
+
+  async analyzeStructure(projectId: string, outlineId: string): Promise<StructureHealthReport> {
+    const response = await apiClient.get(
+      `/projects/${projectId}/outlines/${outlineId}/structure-health`,
+    )
     return response.data
   },
 

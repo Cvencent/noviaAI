@@ -15,6 +15,7 @@ import {
   CreateOutlineItemDto,
   UpdateOutlineItemDto,
   ReorderOutlineItemsDto,
+  GenerateOutlineDto,
 } from './dto'
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard'
 import { CurrentUser } from '../auth/decorators/current-user.decorator'
@@ -38,6 +39,15 @@ export class OutlinesController {
     return this.outlinesService.findAll(user.id, projectId)
   }
 
+  @Post('ai-generate')
+  async generateWithAi(
+    @CurrentUser() user: any,
+    @Param('projectId') projectId: string,
+    @Body() generateOutlineDto: GenerateOutlineDto,
+  ) {
+    return this.outlinesService.generateWithAi(user.id, projectId, generateOutlineDto)
+  }
+
   @Get(':id')
   async findOne(
     @CurrentUser() user: any,
@@ -45,6 +55,15 @@ export class OutlinesController {
     @Param('id') id: string,
   ) {
     return this.outlinesService.findOne(user.id, projectId, id)
+  }
+
+  @Get(':id/structure-health')
+  async analyzeStructure(
+    @CurrentUser() user: any,
+    @Param('projectId') projectId: string,
+    @Param('id') id: string,
+  ) {
+    return this.outlinesService.analyzeStructure(user.id, projectId, id)
   }
 
   @Put(':id')

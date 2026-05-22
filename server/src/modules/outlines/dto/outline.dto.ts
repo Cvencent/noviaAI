@@ -1,4 +1,4 @@
-import { IsString, IsNotEmpty, IsOptional, IsInt } from 'class-validator'
+import { IsString, IsNotEmpty, IsOptional, IsInt, Min, Max, IsIn } from 'class-validator'
 
 export class CreateOutlineDto {
   @IsString()
@@ -139,4 +139,26 @@ export class UpdateOutlineItemDto {
 export class ReorderOutlineItemsDto {
   @IsString({ each: true })
   itemIds: string[]
+}
+
+export class GenerateOutlineDto {
+  @IsString()
+  @IsOptional()
+  premise?: string
+
+  @IsString()
+  @IsOptional()
+  @IsIn(['THREE_ACT', 'HERO_JOURNEY', 'KISHOTENKETSU', 'SAVE_THE_CAT', 'SEVEN_POINT'])
+  structureTemplate?: string
+
+  @IsInt()
+  @IsOptional()
+  @Min(1)
+  @Max(80)
+  chapterCount?: number
+
+  @IsInt()
+  @IsOptional()
+  @Min(500)
+  targetWords?: number
 }

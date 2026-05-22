@@ -7,6 +7,9 @@ import {
   List,
   Clock,
   GripVertical,
+  Sparkles,
+  BarChart3,
+  AlertCircle,
 } from 'lucide-react'
 import { Button } from '../components/ui/Button'
 import { Card } from '../components/ui/Card'
@@ -20,12 +23,22 @@ import {
   OutlineItem,
   CreateOutlineDto,
   CreateOutlineItemDto,
+  GenerateOutlineDto,
+  StructureHealthReport,
 } from '../api/outlines'
 
 const STRUCTURE_TYPES = [
   { value: 'FULL_BOOK', label: '全书大纲' },
   { value: 'VOLUME', label: '卷大纲' },
   { value: 'ARC', label: '篇章大纲' },
+]
+
+const AI_STRUCTURE_TEMPLATES = [
+  { value: 'THREE_ACT', label: '三幕式' },
+  { value: 'HERO_JOURNEY', label: '英雄之旅' },
+  { value: 'KISHOTENKETSU', label: '起承转合' },
+  { value: 'SAVE_THE_CAT', label: 'Save the Cat 15 节拍' },
+  { value: 'SEVEN_POINT', label: '七点故事结构' },
 ]
 
 const OUTLINE_STATUS_OPTIONS = [
@@ -40,12 +53,16 @@ export function OutlineManagement() {
   const [outlines, setOutlines] = useState<Outline[]>([])
   const [selectedOutline, setSelectedOutline] = useState<Outline | null>(null)
   const [isOutlineModalOpen, setIsOutlineModalOpen] = useState(false)
+  const [isAiModalOpen, setIsAiModalOpen] = useState(false)
   const [isItemModalOpen, setIsItemModalOpen] = useState(false)
   const [isItemEditModalOpen, setIsItemEditModalOpen] = useState(false)
   const [outlineModalMode, setOutlineModalMode] = useState<'create' | 'edit'>('create')
   const [isLoading, setIsLoading] = useState(true)
+  const [isGeneratingOutline, setIsGeneratingOutline] = useState(false)
+  const [isAnalyzingStructure, setIsAnalyzingStructure] = useState(false)
   const [editingItem, setEditingItem] = useState<OutlineItem | null>(null)
   const [draggedItem, setDraggedItem] = useState<OutlineItem | null>(null)
+  const [structureReport, setStructureReport] = useState<StructureHealthReport | null>(null)
 
   const [outlineFormData, setOutlineFormData] = useState<CreateOutlineDto>({
     title: '',
@@ -63,6 +80,13 @@ export function OutlineManagement() {
     povCharacter: '',
     location: '',
     estimatedWords: undefined,
+  })
+
+  const [aiFormData, setAiFormData] = useState<GenerateOutlineDto>({
+    premise: '',
+    structureTemplate: 'THREE_ACT',
+    chapterCount: 12,
+    targetWords: 80000,
   })
 
   useEffect(() => {
@@ -90,6 +114,39 @@ export function OutlineManagement() {
       status: 'DRAFT',
     })
     setIsOutlineModalOpen(true)
+  }
+
+  const handleGenerateOutline = async () => {
+    if (!projectId) return
+
+    setIsGeneratingOutline(true)
+    try {
+      const generated = await outlinesApi.generateWithAi(projectId, aiFormData)
+      await loadOutlines()
+      setSelectedOutline(generated)
+      setStructureReport(null)
+      setIsAiModalOpen(false)
+    } catch (error) {
+      console.error('AI 生成大纲失败:', error)
+      alert('AI 生成大纲失败，请检查 AI 设置或稍后重试')
+    } finally {
+      setIsGeneratingOutline(false)
+    }
+  }
+
+  const handleAnalyzeStructure = async () => {
+    if (!projectId || !selectedOutline) return
+
+    setIsAnalyzingStructure(true)
+    try {
+      const report = await outlinesApi.analyzeStructure(projectId, selectedOutline.id)
+      setStructureReport(report)
+    } catch (error) {
+      console.error('结构分析失败:', error)
+      alert('结构分析失败，请稍后重试')
+    } finally {
+      setIsAnalyzingStructure(false)
+    }
   }
 
   const handleEditOutline = (outline: Outline) => {
@@ -341,10 +398,16 @@ export function OutlineManagement() {
             <h1 className="text-2xl font-bold text-gray-900">大纲管理</h1>
             <p className="text-gray-600 mt-1">规划和管理故事的整体结构大纲</p>
           </div>
-          <Button onClick={handleCreateOutline}>
-            <Plus className="w-4 h-4 mr-2" />
-            创建大纲
-          </Button>
+          <div className="flex gap-3">
+            <Button variant="outline" onClick={() => setIsAiModalOpen(true)}>
+              <Sparkles className="w-4 h-4 mr-2" />
+              AI 生成大纲
+            </Button>
+            <Button onClick={handleCreateOutline}>
+              <Plus className="w-4 h-4 mr-2" />
+              创建大纲
+            </Button>
+          </div>
         </div>
 
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
@@ -358,7 +421,10 @@ export function OutlineManagement() {
                   outlines.map(outline => (
                     <div
                       key={outline.id}
-                      onClick={() => setSelectedOutline(outline)}
+                      onClick={() => {
+                        setSelectedOutline(outline)
+                        setStructureReport(null)
+                      }}
                       className={`p-4 cursor-pointer transition-colors hover:bg-gray-50 ${
                         selectedOutline?.id === outline.id ? 'bg-blue-50 border-l-4 border-blue-500' : ''
                       }`}
@@ -426,13 +492,69 @@ export function OutlineManagement() {
                       <p className="text-sm text-gray-500 mt-1">{selectedOutline.description}</p>
                     )}
                   </div>
-                  <Button onClick={handleAddItem}>
-                    <Plus className="w-4 h-4 mr-2" />
-                    添加条目
-                  </Button>
+                  <div className="flex gap-2">
+                    <Button variant="outline" onClick={handleAnalyzeStructure} isLoading={isAnalyzingStructure}>
+                      <BarChart3 className="w-4 h-4 mr-2" />
+                      结构分析
+                    </Button>
+                    <Button onClick={handleAddItem}>
+                      <Plus className="w-4 h-4 mr-2" />
+                      添加条目
+                    </Button>
+                  </div>
                 </div>
 
                 <div className="p-6">
+                  {structureReport && (
+                    <div className="mb-6 rounded-lg border border-indigo-100 bg-indigo-50 p-4">
+                      <div className="flex items-center justify-between mb-4">
+                        <div>
+                          <h3 className="font-semibold text-gray-900 flex items-center gap-2">
+                            <BarChart3 className="w-4 h-4 text-indigo-600" />
+                            结构健康度
+                          </h3>
+                          <p className="text-sm text-gray-600 mt-1">
+                            模板：{AI_STRUCTURE_TEMPLATES.find(t => t.value === structureReport.templateId)?.label || structureReport.templateId}
+                          </p>
+                        </div>
+                        <div className="flex gap-3 text-sm">
+                          <span className="rounded bg-white px-3 py-1 text-indigo-700">
+                            覆盖 {structureReport.coverageScore}
+                          </span>
+                          <span className="rounded bg-white px-3 py-1 text-indigo-700">
+                            节奏 {structureReport.pacingScore}
+                          </span>
+                        </div>
+                      </div>
+                      {(structureReport.missingBeats.length > 0 || structureReport.overloadedBeats.length > 0) && (
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-3 mb-3 text-sm">
+                          {structureReport.missingBeats.length > 0 && (
+                            <div className="rounded bg-white p-3">
+                              <p className="font-medium text-gray-700 mb-1">缺失节拍</p>
+                              <p className="text-gray-600">{structureReport.missingBeats.join('、')}</p>
+                            </div>
+                          )}
+                          {structureReport.overloadedBeats.length > 0 && (
+                            <div className="rounded bg-white p-3">
+                              <p className="font-medium text-gray-700 mb-1">过重章节</p>
+                              <p className="text-gray-600">{structureReport.overloadedBeats.join('、')}</p>
+                            </div>
+                          )}
+                        </div>
+                      )}
+                      {structureReport.suggestions.length > 0 && (
+                        <div className="space-y-2">
+                          {structureReport.suggestions.map((suggestion, index) => (
+                            <div key={index} className="flex gap-2 text-sm text-gray-700">
+                              <AlertCircle className="w-4 h-4 text-indigo-600 mt-0.5 flex-shrink-0" />
+                              <span>{suggestion}</span>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  )}
+
                   {selectedOutline.items.length > 0 ? (
                     <div className="relative">
                       <div className="absolute left-6 top-0 bottom-0 w-0.5 bg-gradient-to-b from-blue-500 via-indigo-500 to-purple-500" />
@@ -534,6 +656,77 @@ export function OutlineManagement() {
           </div>
         </div>
       </div>
+
+      <Modal
+        isOpen={isAiModalOpen}
+        onClose={() => setIsAiModalOpen(false)}
+        title="AI 生成大纲"
+        size="lg"
+      >
+        <div className="space-y-4">
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">结构模板</label>
+            <Select
+              value={aiFormData.structureTemplate}
+              onChange={(e) => setAiFormData({
+                ...aiFormData,
+                structureTemplate: e.target.value as GenerateOutlineDto['structureTemplate'],
+              })}
+              className="w-full"
+            >
+              {AI_STRUCTURE_TEMPLATES.map(opt => (
+                <option key={opt.value} value={opt.value}>{opt.label}</option>
+              ))}
+            </Select>
+          </div>
+
+          <div className="grid grid-cols-2 gap-4">
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">章节数量</label>
+              <Input
+                type="number"
+                min={1}
+                max={80}
+                value={aiFormData.chapterCount ?? ''}
+                onChange={(e) => setAiFormData({
+                  ...aiFormData,
+                  chapterCount: e.target.value ? Number(e.target.value) : undefined,
+                })}
+              />
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">目标总字数</label>
+              <Input
+                type="number"
+                min={500}
+                value={aiFormData.targetWords ?? ''}
+                onChange={(e) => setAiFormData({
+                  ...aiFormData,
+                  targetWords: e.target.value ? Number(e.target.value) : undefined,
+                })}
+              />
+            </div>
+          </div>
+
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">补充设想</label>
+            <Textarea
+              value={aiFormData.premise || ''}
+              onChange={(e) => setAiFormData({ ...aiFormData, premise: e.target.value })}
+              placeholder="可以补充主线、角色、冲突、结尾方向；不填则使用项目简介。"
+              rows={5}
+            />
+          </div>
+        </div>
+
+        <div className="flex justify-end gap-3 pt-4 border-t mt-4">
+          <Button variant="outline" onClick={() => setIsAiModalOpen(false)}>取消</Button>
+          <Button onClick={handleGenerateOutline} isLoading={isGeneratingOutline}>
+            <Sparkles className="w-4 h-4 mr-2" />
+            生成并保存
+          </Button>
+        </div>
+      </Modal>
 
       <Modal
         isOpen={isOutlineModalOpen}
