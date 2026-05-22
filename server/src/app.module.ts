@@ -19,6 +19,7 @@ import { TimelineModule } from './modules/timeline/timeline.module'
 import { PlotsModule } from './modules/plots/plots.module'
 import { WritingStylesModule } from './modules/writing-styles/writing-styles.module'
 import { ConsistencyModule } from './modules/consistency/consistency.module'
+import { DialogueSessionsModule } from './modules/dialogue-sessions/dialogue-sessions.module'
 
 @Module({
   imports: [
@@ -44,6 +45,7 @@ import { ConsistencyModule } from './modules/consistency/consistency.module'
     PlotsModule,
     WritingStylesModule,
     ConsistencyModule,
+    DialogueSessionsModule,
   ],
 })
 export class AppModule {}

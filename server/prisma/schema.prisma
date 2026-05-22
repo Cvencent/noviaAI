@@ -64,6 +64,7 @@ model Project {
   outlines                Outline[]
   turningPoints           TurningPoint[]
   timelineEvents          TimelineEvent[]
+  dialogueSessions        DialogueSession[]
   
   // 写作风格配置
   currentWritingStyleId   String?
@@ -491,4 +492,45 @@ model TimelineEvent {
 
   @@index([projectId])
   @@index([chapterId])
+}
+
+// ==================== 角色对话沙盒 ====================
+model DialogueSession {
+  id                String            @id @default(uuid())
+  projectId         String
+  chapterId         String?
+  title             String
+  location          String?
+  conflict          String
+  goal              String
+  mood              String?
+  allowSecretReveal Boolean           @default(false)
+  length            String            @default("medium") // short, medium, long
+  status            String            @default("ACTIVE") // ACTIVE, PAUSED, COMPLETED
+  characterIds      String
+  currentTurn       Int               @default(0)
+  lastInstruction   String?
+  createdAt         DateTime          @default(now())
+  updatedAt         DateTime          @updatedAt
+  project           Project           @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  messages          DialogueMessage[]
+
+  @@index([projectId])
+  @@index([chapterId])
+  @@index([status])
+}
+
+model DialogueMessage {
+  id        String          @id @default(uuid())
+  sessionId String
+  speaker   String
+  content   String
+  type      String          @default("DIALOGUE") // DIALOGUE, INSTRUCTION, SYSTEM
+  order     Int
+  metadata  String?
+  createdAt DateTime        @default(now())
+  session   DialogueSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+
+  @@index([sessionId])
+  @@index([order])
 }

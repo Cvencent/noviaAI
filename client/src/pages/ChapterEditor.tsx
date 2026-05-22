@@ -13,7 +13,8 @@ import {
   Users,
   Link2,
   Palette,
-  Flag
+  Flag,
+  MessageSquare
 } from 'lucide-react'
 import { Button } from '../components/ui/Button'
 import { Card } from '../components/ui/Card'
@@ -27,6 +28,7 @@ import { EnhancedWritingToolbar } from '../components/EnhancedWritingToolbar'
 import { ProjectStyleSelector } from '../components/ProjectStyleSelector'
 import { LorebookManager } from '../components/LorebookManager'
 import { ChekhovsGunManager } from '../components/ChekhovsGunManager'
+import { DialogueSandbox } from '../components/DialogueSandbox'
 import { RichTextEditor, RichTextEditorHandle } from '../components/editor/RichTextEditor'
 import { ContextViewer } from '../components/ContextViewer'
 import { StreamingCursor } from '../components/StreamingCursor'
@@ -87,6 +89,7 @@ export function ChapterEditor() {
   const [showLorePanel, setShowLorePanel] = useState(false)
   const [showGunPanel, setShowGunPanel] = useState(false)
   const [showContextPanel, setShowContextPanel] = useState(false)
+  const [showDialoguePanel, setShowDialoguePanel] = useState(false)
   const [contextPreview, setContextPreview] = useState<ContextPreview | null>(null)
   const [isLoadingContextPreview, setIsLoadingContextPreview] = useState(false)
   
@@ -557,6 +560,10 @@ export function ChapterEditor() {
               <Eye className="w-4 h-4 mr-2" />
               AI 视野
             </Button>
+            <Button variant="outline" size="sm" onClick={() => setShowDialoguePanel(!showDialoguePanel)}>
+              <MessageSquare className="w-4 h-4 mr-2" />
+              对话沙盒
+            </Button>
             <Button 
               variant="outline" 
               size="sm" 
@@ -747,6 +754,17 @@ export function ChapterEditor() {
               preview={contextPreview}
               isLoading={isLoadingContextPreview}
               onRefresh={loadContextPreview}
+            />
+          </div>
+        )}
+
+        {showDialoguePanel && projectId && (
+          <div className="w-[48rem] bg-white border-l border-gray-200 overflow-y-auto">
+            <DialogueSandbox
+              projectId={projectId}
+              chapterId={chapterId}
+              onClose={() => setShowDialoguePanel(false)}
+              onInsertText={handleInsertText}
             />
           </div>
         )}
