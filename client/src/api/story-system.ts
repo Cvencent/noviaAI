@@ -221,6 +221,19 @@ export interface PublishChecklist {
   }>
 }
 
+export interface StoryGraphSearchResult {
+  projectId: string
+  query: string
+  results: Array<{
+    id: string
+    sourceType: string
+    sourceId: string
+    text: string
+    score: number
+    metadata?: Record<string, unknown>
+  }>
+}
+
 export const storySystemApi = {
   async refreshContracts(projectId: string, chapterId: string): Promise<{ contracts: StoryContract[] }> {
     const response = await apiClient.post(
@@ -347,6 +360,13 @@ export const storySystemApi = {
   async findGraphPath(projectId: string, from: string, to: string): Promise<{ from: StoryEntity | null; to: StoryEntity | null; relations: unknown[] }> {
     const response = await apiClient.get(`/projects/${projectId}/story-graph/path`, {
       params: { from, to },
+    })
+    return response.data
+  },
+
+  async searchStoryGraph(projectId: string, query: string): Promise<StoryGraphSearchResult> {
+    const response = await apiClient.get(`/projects/${projectId}/story-graph/search`, {
+      params: { q: query },
     })
     return response.data
   },

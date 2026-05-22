@@ -13,6 +13,8 @@ export function StoryGraphWorkbench() {
   const [from, setFrom] = useState('')
   const [to, setTo] = useState('')
   const [pathResult, setPathResult] = useState<any>(null)
+  const [searchQuery, setSearchQuery] = useState('')
+  const [searchResults, setSearchResults] = useState<any[]>([])
   const [isLoading, setIsLoading] = useState(false)
 
   useEffect(() => {
@@ -34,6 +36,17 @@ export function StoryGraphWorkbench() {
     setIsLoading(true)
     try {
       setPathResult(await storySystemApi.findGraphPath(projectId, from.trim(), to.trim()))
+    } finally {
+      setIsLoading(false)
+    }
+  }
+
+  const searchGraph = async () => {
+    if (!projectId || !searchQuery.trim()) return
+    setIsLoading(true)
+    try {
+      const result = await storySystemApi.searchStoryGraph(projectId, searchQuery.trim())
+      setSearchResults(result.results)
     } finally {
       setIsLoading(false)
     }
@@ -63,6 +76,30 @@ export function StoryGraphWorkbench() {
               <div className="mt-1 text-xs text-gray-500">
                 {(pathResult.relations || []).map((relation: any) => relation.type).join(' / ') || '未找到关系路径'}
               </div>
+            </div>
+          )}
+        </div>
+
+        <div className="rounded-lg border border-gray-200 bg-white p-4">
+          <div className="mb-3 flex items-center gap-2 text-sm font-medium text-gray-900">
+            <Search className="h-4 w-4" />
+            语义检索
+          </div>
+          <div className="grid gap-2 md:grid-cols-[1fr_auto]">
+            <Input value={searchQuery} onChange={(event) => setSearchQuery(event.target.value)} placeholder="搜索实体、世界事实、伏笔或章节记忆" />
+            <Button onClick={searchGraph} isLoading={isLoading}>搜索</Button>
+          </div>
+          {searchResults.length > 0 && (
+            <div className="mt-3 space-y-2">
+              {searchResults.map((item) => (
+                <div key={item.id} className="rounded border border-gray-100 bg-gray-50 p-3 text-sm">
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="font-medium text-gray-800">{item.sourceType}</span>
+                    <span className="text-xs text-gray-500">{item.score.toFixed(3)}</span>
+                  </div>
+                  <div className="mt-1 text-gray-700">{item.text}</div>
+                </div>
+              ))}
             </div>
           )}
         </div>

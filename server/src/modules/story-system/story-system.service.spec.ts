@@ -1,5 +1,6 @@
 import { BadRequestException, ForbiddenException, NotFoundException } from '@nestjs/common'
 import JSZip = require('jszip')
+import { OpenaiProvider } from '../ai/providers/openai.provider'
 import { StorySystemService } from './story-system.service'
 
 describe('StorySystemService', () => {
@@ -7,6 +8,7 @@ describe('StorySystemService', () => {
   let prisma: any
   let aiService: any
   let styleApplicationService: any
+  let openaiProvider: any
 
   const project = {
     id: 'project-1',
@@ -119,6 +121,10 @@ describe('StorySystemService', () => {
         create: jest.fn(),
         findFirst: jest.fn(),
       },
+      storyVectorIndex: {
+        findMany: jest.fn(),
+        upsert: jest.fn(),
+      },
       storyEntity: {
         upsert: jest.fn(),
         findMany: jest.fn(),
@@ -143,7 +149,11 @@ describe('StorySystemService', () => {
       generateMultiStageStylePrompt: jest.fn(),
     }
 
-    service = new StorySystemService(prisma, aiService, styleApplicationService)
+    openaiProvider = {
+      embed: jest.fn(),
+    }
+
+    service = new StorySystemService(prisma, aiService, styleApplicationService, openaiProvider as OpenaiProvider)
   })
 
   function mockProjectGraph() {
@@ -1062,6 +1072,46 @@ describe('StorySystemService', () => {
       expect.objectContaining({ key: 'projections', status: 'WARNING' }),
       expect.objectContaining({ key: 'exports', status: 'PASS' }),
     ]))
+  })
+
+  it('indexes accepted commit summaries into vector memory', async () => {
+    mockProjectGraph()
+    openaiProvider.embed.mockResolvedValue([0.1, 0.2, 0.3])
+
+    await service.indexCommitVector('project-1', {
+      id: 'commit-1',
+      chapterId: 'chapter-1',
+      summaryText: '旧港出现记忆芯片。',
+      contentSnapshot: '林澄拿出芯片。',
+    })
+
+    expect(openaiProvider.embed).toHaveBeenCalledWith('旧港出现记忆芯片。', 'text-embedding-3-small')
+    expect(prisma.storyVectorIndex.upsert).toHaveBeenCalledWith({
+      where: { projectId_sourceType_sourceId: { projectId: 'project-1', sourceType: 'CHAPTER_COMMIT', sourceId: 'commit-1' } },
+      create: expect.objectContaining({
+        projectId: 'project-1',
+        sourceType: 'CHAPTER_COMMIT',
+        sourceId: 'commit-1',
+        embeddingJson: JSON.stringify([0.1, 0.2, 0.3]),
+      }),
+      update: expect.objectContaining({
+        embeddingJson: JSON.stringify([0.1, 0.2, 0.3]),
+      }),
+    })
+  })
+
+  it('searches story graph with vector rerank when embeddings exist', async () => {
+    mockProjectGraph()
+    openaiProvider.embed.mockResolvedValue([1, 0])
+    prisma.storyVectorIndex.findMany.mockResolvedValue([
+      { id: 'v1', sourceType: 'WORLD_FACT', sourceId: 'fact-1', text: '记忆芯片裂纹指向篡改', embeddingJson: JSON.stringify([0.9, 0.1]), metadata: JSON.stringify({ title: '芯片裂纹' }) },
+      { id: 'v2', sourceType: 'OPEN_LOOP', sourceId: 'loop-1', text: '雨巷失踪线索', embeddingJson: JSON.stringify([0.1, 0.9]), metadata: JSON.stringify({ title: '雨巷' }) },
+    ])
+
+    const result = await service.searchStoryGraph('user-1', 'project-1', '芯片')
+
+    expect(result.results[0]).toEqual(expect.objectContaining({ sourceId: 'fact-1', score: expect.any(Number) }))
+    expect(openaiProvider.embed).toHaveBeenCalledWith('芯片', 'text-embedding-3-small')
   })
 
   it('creates a repair agent step from an open repair plan without changing chapter content', async () => {

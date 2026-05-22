@@ -52,6 +52,33 @@ export class OpenaiProvider {
     }
   }
 
+  async embed(input: string, model = 'text-embedding-3-small'): Promise<number[]> {
+    if (!this.apiKey) {
+      throw new InternalServerErrorException('OpenAI API Key 未配置')
+    }
+
+    try {
+      const client = axios.create({
+        baseURL: this.baseUrl,
+        headers: {
+          Authorization: `Bearer ${this.apiKey}`,
+          'Content-Type': 'application/json',
+        },
+      })
+
+      const response = await client.post('/embeddings', {
+        model,
+        input,
+      })
+
+      return (response.data as any).data?.[0]?.embedding || []
+    } catch (error: any) {
+      throw new InternalServerErrorException(
+        `OpenAI Embedding 调用失败: ${error.response?.data?.error?.message || error.message}`,
+      )
+    }
+  }
+
   async *chatStream(options: CompletionOptions): AsyncGenerator<string> {
     if (!this.apiKey) {
       throw new InternalServerErrorException('OpenAI API Key 未配置')

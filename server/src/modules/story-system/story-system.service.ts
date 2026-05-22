@@ -8,6 +8,7 @@ import JSZip = require('jszip')
 import PDFDocument = require('pdfkit')
 import { PrismaService } from '../../prisma/prisma.service'
 import { AiService } from '../ai/ai.service'
+import { OpenaiProvider } from '../ai/providers/openai.provider'
 import { AIAction } from '../ai-config/dto/create-ai-config.dto'
 import { StyleApplicationService } from '../writing-styles/style-application.service'
 import {
@@ -46,6 +47,7 @@ export class StorySystemService {
     private prisma: PrismaService,
     private aiService: AiService,
     private styleApplicationService: StyleApplicationService,
+    private openaiProvider: OpenaiProvider,
   ) {}
 
   async refreshChapterContracts(userId: string, projectId: string, chapterId: string) {
@@ -578,8 +580,11 @@ ${dto.content}`
           where: { id: commit.id },
           data: { projectionStatus: JSON.stringify(finalProjectionStatus) },
         })
-        return { ...commit, projectionStatus: JSON.stringify(finalProjectionStatus) }
+        const updatedCommit = { ...commit, projectionStatus: JSON.stringify(finalProjectionStatus) }
+        await this.tryIndexCommitVector(projectId, updatedCommit)
+        return updatedCommit
       }
+      await this.tryIndexCommitVector(projectId, commit)
     } else {
       return this.createRejectedCommitWorkflow(projectId, chapterId, commit, normalizedIssues)
     }
@@ -1194,6 +1199,62 @@ ${overrideTrace.map((trace) => `- ${trace.chapterId}: ${trace.reason}`).join('\n
     }
   }
 
+  async indexCommitVector(projectId: string, commit: any) {
+    if (!this.prisma.storyVectorIndex?.upsert) return null
+    const text = this.normalizeText(commit.summaryText || this.buildFallbackSummary(commit.contentSnapshot))
+    if (!text) return null
+    const embedding = await this.openaiProvider.embed(text, 'text-embedding-3-small')
+    return this.prisma.storyVectorIndex.upsert({
+      where: {
+        projectId_sourceType_sourceId: {
+          projectId,
+          sourceType: 'CHAPTER_COMMIT',
+          sourceId: commit.id,
+        },
+      },
+      create: {
+        projectId,
+        sourceType: 'CHAPTER_COMMIT',
+        sourceId: commit.id,
+        text,
+        embeddingJson: JSON.stringify(embedding),
+        metadata: JSON.stringify({ chapterId: commit.chapterId }),
+      },
+      update: {
+        text,
+        embeddingJson: JSON.stringify(embedding),
+        metadata: JSON.stringify({ chapterId: commit.chapterId }),
+      },
+    })
+  }
+
+  async searchStoryGraph(userId: string, projectId: string, query = '') {
+    await this.loadProject(userId, projectId)
+    const normalizedQuery = this.normalizeText(query)
+    if (!normalizedQuery) {
+      return { projectId, query: normalizedQuery, results: [] }
+    }
+    const items = await (this.prisma.storyVectorIndex?.findMany?.({
+      where: { projectId },
+      orderBy: { updatedAt: 'desc' },
+      take: 200,
+    }) ?? Promise.resolve([]))
+    const queryEmbedding = await this.openaiProvider.embed(normalizedQuery, 'text-embedding-3-small')
+    const results = items
+      .map((item: any) => ({
+        id: item.id,
+        sourceType: item.sourceType,
+        sourceId: item.sourceId,
+        text: item.text,
+        metadata: this.parseJson(item.metadata, {}),
+        score: this.cosineSimilarity(queryEmbedding, this.parseJson(item.embeddingJson, [])),
+      }))
+      .filter((item) => item.score > 0 || item.text.includes(normalizedQuery))
+      .sort((a, b) => b.score - a.score)
+      .slice(0, 20)
+    return { projectId, query: normalizedQuery, results }
+  }
+
   private async executeRunStep(userId: string, run: any, stepType: StoryAgentStepType) {
     const steps = await this.prisma.storyAgentStep.findMany({
       where: { runId: run.id },
@@ -1517,6 +1578,27 @@ ${this.chapterText(chapter)}`
       project.genre ? `${project.genre} genre hook` : `${project.title} story premise`,
       ...tags.map((tag) => `${tag} element`),
     ].slice(0, 6)
+  }
+
+  private async tryIndexCommitVector(projectId: string, commit: any) {
+    try {
+      await this.indexCommitVector(projectId, commit)
+    } catch {
+      // Vector indexing should not block accepted commit projection.
+    }
+  }
+
+  private cosineSimilarity(left: number[], right: number[]) {
+    if (!left.length || left.length !== right.length) return 0
+    let dot = 0
+    let leftNorm = 0
+    let rightNorm = 0
+    for (let index = 0; index < left.length; index += 1) {
+      dot += left[index] * right[index]
+      leftNorm += left[index] * left[index]
+      rightNorm += right[index] * right[index]
+    }
+    return leftNorm && rightNorm ? dot / (Math.sqrt(leftNorm) * Math.sqrt(rightNorm)) : 0
   }
 
   private stylePromptItems(stylePrompt: any) {
