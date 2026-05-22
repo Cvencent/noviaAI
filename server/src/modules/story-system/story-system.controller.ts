@@ -6,6 +6,7 @@ import {
   ContinueStoryAgentRunDto,
   CreateChapterCommitDto,
   DismissRepairPlanDto,
+  ExportBookDto,
   RepairChapterDto,
   StartStoryAgentRunDto,
   WriteChapterDto,
@@ -179,6 +180,23 @@ export class StorySystemController {
     @Param('projectId') projectId: string,
   ) {
     return this.storySystemService.rebuildProjections(user.id, projectId)
+  }
+
+  @Get('story-system/full-book-review')
+  reviewFullBook(
+    @CurrentUser() user: any,
+    @Param('projectId') projectId: string,
+  ) {
+    return this.storySystemService.reviewFullBook(user.id, projectId)
+  }
+
+  @Post('story-system/export')
+  exportBook(
+    @CurrentUser() user: any,
+    @Param('projectId') projectId: string,
+    @Body() dto: ExportBookDto,
+  ) {
+    return this.storySystemService.exportBook(user.id, projectId, dto)
   }
 
   @Post('chapters/:chapterId/story-system/agent-runs')

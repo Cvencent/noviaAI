@@ -10,12 +10,15 @@ import {
   CheckCircle,
   Clock,
   Eye,
+  Download,
+  ShieldCheck,
 } from 'lucide-react'
 import { Button } from '../components/ui/Button'
 import { Card } from '../components/ui/Card'
 import { Input } from '../components/ui/Input'
 import { Modal } from '../components/ui/Modal'
 import { chaptersApi, Chapter } from '../api/chapters'
+import { FullBookReview, storySystemApi } from '../api/story-system'
 
 const STATUS_CONFIG = {
   draft: { label: '草稿', icon: Clock, color: 'text-yellow-600 bg-yellow-50' },
@@ -37,6 +40,8 @@ export function ChapterManagement() {
   const [editingChapter, setEditingChapter] = useState<Chapter | null>(null)
   const [newChapterTitle, setNewChapterTitle] = useState('')
   const [draggedIndex, setDraggedIndex] = useState<number | null>(null)
+  const [fullBookReview, setFullBookReview] = useState<FullBookReview | null>(null)
+  const [isStoryActionBusy, setIsStoryActionBusy] = useState(false)
 
   useEffect(() => {
     loadChapters()
@@ -145,6 +150,37 @@ export function ChapterManagement() {
     setShowEditModal(true)
   }
 
+  const handleFullBookReview = async () => {
+    if (!projectId) return
+    setIsStoryActionBusy(true)
+    try {
+      setFullBookReview(await storySystemApi.reviewFullBook(projectId))
+    } catch (error) {
+      console.error('全书审查失败:', error)
+    } finally {
+      setIsStoryActionBusy(false)
+    }
+  }
+
+  const handleExportMarkdown = async () => {
+    if (!projectId) return
+    setIsStoryActionBusy(true)
+    try {
+      const exported = await storySystemApi.exportBook(projectId, { format: 'MARKDOWN' })
+      const blob = new Blob([exported.content], { type: exported.mimeType || 'text/markdown;charset=utf-8' })
+      const url = URL.createObjectURL(blob)
+      const link = document.createElement('a')
+      link.href = url
+      link.download = exported.fileName
+      link.click()
+      URL.revokeObjectURL(url)
+    } catch (error) {
+      console.error('Markdown 导出失败:', error)
+    } finally {
+      setIsStoryActionBusy(false)
+    }
+  }
+
   const filteredChapters = chapters.filter(chapter => {
     const matchesSearch = !searchQuery ||
       chapter.title.toLowerCase().includes(searchQuery.toLowerCase())
@@ -172,11 +208,52 @@ export function ChapterManagement() {
               共 {chapters.length} 章 | 总字数 {totalWords.toLocaleString()}
             </p>
           </div>
-          <Button onClick={() => setShowCreateModal(true)}>
+          <div className="flex items-center gap-2">
+            <Button variant="outline" onClick={handleFullBookReview} isLoading={isStoryActionBusy}>
+              <ShieldCheck className="w-4 h-4 mr-2" />
+              全书审查
+            </Button>
+            <Button variant="outline" onClick={handleExportMarkdown} isLoading={isStoryActionBusy}>
+              <Download className="w-4 h-4 mr-2" />
+              导出 Markdown
+            </Button>
+            <Button onClick={() => setShowCreateModal(true)}>
             <Plus className="w-4 h-4 mr-2" />
             新建章节
-          </Button>
+            </Button>
+          </div>
         </div>
+
+        {fullBookReview && (
+          <div className="mb-6 rounded-lg border border-gray-200 bg-white p-4">
+            <div className="flex items-center justify-between gap-4">
+              <div>
+                <div className="text-sm font-medium text-gray-900">全书审查 · {fullBookReview.status}</div>
+                <div className="mt-1 text-xs text-gray-500">
+                  accepted {fullBookReview.summary.acceptedChapters}/{fullBookReview.summary.totalChapters}
+                  {' · '}阻塞报告 {fullBookReview.summary.blockingReports}
+                  {' · '}未回收伏笔 {fullBookReview.summary.openLoops}
+                  {' · '}投影失败 {fullBookReview.summary.projectionFailures}
+                </div>
+              </div>
+              <Button variant="ghost" size="sm" onClick={() => setFullBookReview(null)}>
+                收起
+              </Button>
+            </div>
+            {fullBookReview.issues.length > 0 && (
+              <div className="mt-3 space-y-2">
+                {fullBookReview.issues.slice(0, 6).map((issue, index) => (
+                  <div key={`${issue.category}-${issue.sourceId || issue.chapterId || index}`} className="text-xs text-gray-700">
+                    <span className={issue.severity === 'CRITICAL' ? 'font-medium text-red-700' : 'font-medium text-yellow-700'}>
+                      [{issue.category}/{issue.severity}]
+                    </span>{' '}
+                    {issue.message}
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
 
         <div className="flex gap-4 mb-6">
           <div className="flex-1">

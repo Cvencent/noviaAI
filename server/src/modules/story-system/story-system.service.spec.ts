@@ -35,6 +35,7 @@ describe('StorySystemService', () => {
         findFirst: jest.fn(),
       },
       chapter: {
+        findMany: jest.fn(),
         findFirst: jest.fn(),
         update: jest.fn(),
       },
@@ -763,6 +764,81 @@ describe('StorySystemService', () => {
       to: { id: 'entity-b', name: '芯片' },
       relations: [{ fromEntityId: 'entity-a', toEntityId: 'entity-b', type: 'POSSESSES' }],
     })
+  })
+
+  it('reviews the full book for unaccepted chapters, blocking reports, open loops, and projection failures', async () => {
+    mockProjectGraph()
+    prisma.chapter.findMany.mockResolvedValue([
+      { id: 'chapter-1', title: '旧港质问', order: 0, contents: [{ order: 0, content: '林澄拿出芯片。' }] },
+      { id: 'chapter-2', title: '雨巷追踪', order: 1, contents: [{ order: 0, content: '沈遥消失在雨巷。' }] },
+    ])
+    prisma.chapterCommit.findMany.mockResolvedValue([
+      { id: 'commit-3', chapterId: 'chapter-1', status: 'ACCEPTED', projectionStatus: JSON.stringify({ summary: 'FAILED' }), createdAt: new Date('2026-05-22T03:00:00Z') },
+      { id: 'commit-2', chapterId: 'chapter-2', status: 'REJECTED', projectionStatus: JSON.stringify({ summary: 'SKIPPED' }) },
+      { id: 'commit-1', chapterId: 'chapter-1', status: 'ACCEPTED', projectionStatus: JSON.stringify({ summary: 'DONE' }), createdAt: new Date('2026-05-22T01:00:00Z') },
+    ])
+    prisma.reviewReport.findMany.mockResolvedValue([
+      { id: 'report-1', status: 'BLOCKED', chapterId: 'chapter-2', issues: [{ id: 'issue-1', blocking: true, message: '缺少芯片证据' }] },
+    ])
+    prisma.openLoop.findMany.mockResolvedValue([{ id: 'loop-1', key: '芯片裂纹', title: '芯片裂纹', status: 'OPEN' }])
+
+    const review = await service.reviewFullBook('user-1', 'project-1')
+
+    expect(review.status).toBe('BLOCKED')
+    expect(review.summary.totalChapters).toBe(2)
+    expect(review.summary.acceptedChapters).toBe(1)
+    expect(review.issues).toEqual(expect.arrayContaining([
+      expect.objectContaining({ category: 'COMMIT', chapterId: 'chapter-2' }),
+      expect.objectContaining({ category: 'REVIEW', chapterId: 'chapter-2' }),
+      expect.objectContaining({ category: 'OPEN_LOOP', sourceId: 'loop-1' }),
+      expect.objectContaining({ category: 'PROJECTION', chapterId: 'chapter-1', sourceId: 'commit-3' }),
+    ]))
+  })
+
+  it('reviews the full book against the latest accepted chapter snapshot', async () => {
+    mockProjectGraph()
+    prisma.chapter.findMany.mockResolvedValue([
+      { id: 'chapter-1', title: '旧港质问', order: 0, contents: [{ order: 0, content: '林澄拿出芯片。' }] },
+    ])
+    prisma.chapterCommit.findMany.mockResolvedValue([
+      { id: 'commit-new', chapterId: 'chapter-1', status: 'ACCEPTED', projectionStatus: JSON.stringify({ summary: 'DONE' }), createdAt: new Date('2026-05-22T03:00:00Z') },
+      { id: 'commit-old', chapterId: 'chapter-1', status: 'ACCEPTED', projectionStatus: JSON.stringify({ summary: 'FAILED' }), createdAt: new Date('2026-05-22T01:00:00Z') },
+    ])
+    prisma.reviewReport.findMany.mockResolvedValue([
+      { id: 'report-old', status: 'BLOCKED', chapterId: 'chapter-1', createdAt: new Date('2026-05-22T02:00:00Z'), issues: [{ id: 'issue-1', blocking: true }] },
+    ])
+    prisma.openLoop.findMany.mockResolvedValue([])
+
+    const review = await service.reviewFullBook('user-1', 'project-1')
+
+    expect(review.status).toBe('PASS')
+    expect(review.summary.acceptedChapters).toBe(1)
+    expect(review.summary.blockingReports).toBe(0)
+    expect(review.summary.projectionFailures).toBe(0)
+    expect(review.issues).toEqual([])
+  })
+
+  it('exports the book to Markdown in chapter order with accepted commit snapshots', async () => {
+    mockProjectGraph()
+    prisma.chapter.findMany.mockResolvedValue([
+      { id: 'chapter-1', title: '旧港质问', order: 0, contents: [{ order: 0, content: '草稿不应优先。' }] },
+      { id: 'chapter-2', title: '雨巷追踪', order: 1, contents: [{ order: 0, content: '沈遥消失在雨巷。' }] },
+    ])
+    prisma.chapterCommit.findMany.mockResolvedValue([
+      { id: 'commit-1', chapterId: 'chapter-1', status: 'ACCEPTED', contentSnapshot: '<p>林澄拿出芯片。</p>', createdAt: new Date('2026-05-22T01:00:00Z') },
+      { id: 'commit-2', chapterId: 'chapter-2', status: 'REJECTED', contentSnapshot: '不能导出', createdAt: new Date('2026-05-22T02:00:00Z') },
+    ])
+
+    const exported = await service.exportBook('user-1', 'project-1', { format: 'MARKDOWN' })
+
+    expect(exported.format).toBe('MARKDOWN')
+    expect(exported.fileName).toBe('雨城.md')
+    expect(exported.content).toContain('# 雨城')
+    expect(exported.content).toContain('## 第 1 章 旧港质问')
+    expect(exported.content).toContain('林澄拿出芯片。')
+    expect(exported.content).toContain('## 第 2 章 雨巷追踪')
+    expect(exported.content).toContain('> 未找到 accepted commit，导出当前草稿。')
+    expect(exported.content).toContain('沈遥消失在雨巷。')
   })
 
   it('creates a repair agent step from an open repair plan without changing chapter content', async () => {

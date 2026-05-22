@@ -10,6 +10,7 @@ import { AIAction } from '../ai-config/dto/create-ai-config.dto'
 import {
   ContinueStoryAgentRunDto,
   CreateChapterCommitDto,
+  ExportBookDto,
   RepairChapterDto,
   StartStoryAgentRunDto,
   StoryAgentMode,
@@ -755,6 +756,138 @@ ${dto.content}`
     return { from: fromEntity, to: toEntity, relations }
   }
 
+  async reviewFullBook(userId: string, projectId: string) {
+    const project = await this.loadProject(userId, projectId)
+    const [chapters, commits, blockedReports, openLoops] = await Promise.all([
+      this.prisma.chapter.findMany({
+        where: { projectId },
+        include: { contents: { orderBy: { order: 'asc' } } },
+        orderBy: { order: 'asc' },
+      }),
+      this.prisma.chapterCommit.findMany({
+        where: { projectId },
+        orderBy: { createdAt: 'desc' },
+      }),
+      this.prisma.reviewReport.findMany({
+        where: { projectId, status: 'BLOCKED' },
+        include: { issues: true },
+        orderBy: { createdAt: 'desc' },
+      }),
+      this.prisma.openLoop.findMany({
+        where: { projectId, status: 'OPEN' },
+        orderBy: { updatedAt: 'desc' },
+      }),
+    ])
+    const latestAcceptedByChapter = new Map<string, any>()
+    for (const commit of commits.filter((item: any) => item.status === 'ACCEPTED')) {
+      if (!latestAcceptedByChapter.has(commit.chapterId)) {
+        latestAcceptedByChapter.set(commit.chapterId, commit)
+      }
+    }
+    const activeBlockedReports = blockedReports.filter((report: any) => {
+      const latestAccepted = latestAcceptedByChapter.get(report.chapterId)
+      if (!latestAccepted) return true
+      if (!report.createdAt || !latestAccepted.createdAt) return true
+      return new Date(report.createdAt).getTime() >= new Date(latestAccepted.createdAt).getTime()
+    })
+    const issues = [
+      ...chapters
+        .filter((chapter: any) => !latestAcceptedByChapter.has(chapter.id))
+        .map((chapter: any) => ({
+          category: 'COMMIT',
+          severity: 'CRITICAL',
+          chapterId: chapter.id,
+          message: `章节《${chapter.title}》还没有 accepted commit`,
+        })),
+      ...activeBlockedReports.map((report: any) => ({
+        category: 'REVIEW',
+        severity: 'CRITICAL',
+        chapterId: report.chapterId,
+        sourceId: report.id,
+        message: `章节存在阻塞审查报告：${this.asArray(report.issues).filter((issue: any) => issue.blocking).length} 个 blocking issue`,
+      })),
+      ...openLoops.map((loop: any) => ({
+        category: 'OPEN_LOOP',
+        severity: 'NORMAL',
+        chapterId: loop.chapterId,
+        sourceId: loop.id,
+        message: `未回收伏笔：${loop.title || loop.key}`,
+      })),
+      ...[...latestAcceptedByChapter.values()]
+        .filter((commit: any) => this.hasFailedProjection(commit.projectionStatus))
+        .map((commit: any) => ({
+          category: 'PROJECTION',
+          severity: 'NORMAL',
+          chapterId: commit.chapterId,
+          sourceId: commit.id,
+          message: 'accepted commit 存在失败投影，需要重跑 projections',
+        })),
+    ]
+
+    return {
+      projectId,
+      title: project.title,
+      status: issues.some((issue) => issue.severity === 'CRITICAL') ? 'BLOCKED' : issues.length ? 'WARNING' : 'PASS',
+      summary: {
+        totalChapters: chapters.length,
+        acceptedChapters: latestAcceptedByChapter.size,
+        blockingReports: activeBlockedReports.length,
+        openLoops: openLoops.length,
+        projectionFailures: issues.filter((issue) => issue.category === 'PROJECTION').length,
+      },
+      issues,
+    }
+  }
+
+  async exportBook(userId: string, projectId: string, dto: ExportBookDto = {}) {
+    const format = (dto.format || 'MARKDOWN').toUpperCase()
+    if (format !== 'MARKDOWN') {
+      throw new BadRequestException('当前仅支持 Markdown 导出')
+    }
+    const project = await this.loadProject(userId, projectId)
+    const [chapters, commits] = await Promise.all([
+      this.prisma.chapter.findMany({
+        where: { projectId },
+        include: { contents: { orderBy: { order: 'asc' } } },
+        orderBy: { order: 'asc' },
+      }),
+      this.prisma.chapterCommit.findMany({
+        where: { projectId, status: 'ACCEPTED' },
+        orderBy: { createdAt: 'desc' },
+      }),
+    ])
+    const latestAcceptedByChapter = new Map<string, any>()
+    for (const commit of commits.filter((item: any) => item.status === 'ACCEPTED')) {
+      if (!latestAcceptedByChapter.has(commit.chapterId)) {
+        latestAcceptedByChapter.set(commit.chapterId, commit)
+      }
+    }
+
+    const parts = [`# ${project.title}`, '']
+    if (project.synopsis) {
+      parts.push(this.markdownText(project.synopsis), '')
+    }
+    for (const chapter of chapters) {
+      const acceptedCommit = latestAcceptedByChapter.get(chapter.id)
+      const body = acceptedCommit
+        ? acceptedCommit.contentSnapshot
+        : this.chapterText(chapter)
+      parts.push(`## 第 ${chapter.order + 1} 章 ${chapter.title}`, '')
+      if (!acceptedCommit) {
+        parts.push('> 未找到 accepted commit，导出当前草稿。', '')
+      }
+      parts.push(this.markdownText(body), '')
+    }
+
+    return {
+      projectId,
+      format,
+      mimeType: 'text/markdown; charset=utf-8',
+      fileName: `${this.safeFileName(project.title)}.md`,
+      content: parts.join('\n').trimEnd() + '\n',
+    }
+  }
+
   private async executeRunStep(userId: string, run: any, stepType: StoryAgentStepType) {
     const steps = await this.prisma.storyAgentStep.findMany({
       where: { runId: run.id },
@@ -900,6 +1033,24 @@ ${this.chapterText(chapter)}`
   private latestStepPayload(steps: any[], stepType: StoryAgentStepType) {
     const step = [...steps].reverse().find((item) => item.stepType === stepType)
     return step ? this.parseJson(step.output, null) : null
+  }
+
+  private hasFailedProjection(projectionStatus?: string) {
+    const projection = this.parseJson(projectionStatus, {})
+    return Object.values(projection).some((value) => value === 'FAILED')
+  }
+
+  private markdownText(value?: string) {
+    return this.normalizeText(value)
+      .replace(/<\/p>\s*<p>/gi, '\n\n')
+      .replace(/<br\s*\/?>/gi, '\n')
+      .replace(/<\/?[^>]+>/g, '')
+      .trim()
+  }
+
+  private safeFileName(value?: string) {
+    const name = this.normalizeText(value, 'book').replace(/[\\/:*?"<>|]/g, '').trim()
+    return name || 'book'
   }
 
   private nextStep(step: StoryAgentStepType) {

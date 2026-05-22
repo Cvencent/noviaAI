@@ -149,6 +149,36 @@ export interface StoryRepairResult {
   repairPlanId: string
 }
 
+export interface FullBookReviewIssue {
+  category: string
+  severity: string
+  chapterId?: string
+  sourceId?: string
+  message: string
+}
+
+export interface FullBookReview {
+  projectId: string
+  title: string
+  status: 'PASS' | 'WARNING' | 'BLOCKED' | string
+  summary: {
+    totalChapters: number
+    acceptedChapters: number
+    blockingReports: number
+    openLoops: number
+    projectionFailures: number
+  }
+  issues: FullBookReviewIssue[]
+}
+
+export interface BookExportResult {
+  projectId: string
+  format: string
+  mimeType: string
+  fileName: string
+  content: string
+}
+
 export const storySystemApi = {
   async refreshContracts(projectId: string, chapterId: string): Promise<{ contracts: StoryContract[] }> {
     const response = await apiClient.post(
@@ -269,6 +299,16 @@ export const storySystemApi = {
 
   async listGraphEntities(projectId: string): Promise<StoryEntity[]> {
     const response = await apiClient.get(`/projects/${projectId}/story-graph/entities`)
+    return response.data
+  },
+
+  async reviewFullBook(projectId: string): Promise<FullBookReview> {
+    const response = await apiClient.get(`/projects/${projectId}/story-system/full-book-review`)
+    return response.data
+  },
+
+  async exportBook(projectId: string, data: { format?: 'MARKDOWN' | 'EPUB' | 'PDF' | string } = {}): Promise<BookExportResult> {
+    const response = await apiClient.post(`/projects/${projectId}/story-system/export`, data)
     return response.data
   },
 

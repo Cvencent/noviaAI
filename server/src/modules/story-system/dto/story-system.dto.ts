@@ -144,3 +144,9 @@ export class WriteChapterDto {
   @IsOptional()
   maxTokens?: number
 }
+
+export class ExportBookDto {
+  @IsString()
+  @IsOptional()
+  format?: 'MARKDOWN' | 'EPUB' | 'PDF' | string
+}
