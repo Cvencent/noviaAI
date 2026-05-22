@@ -1196,6 +1196,20 @@ describe('StorySystemService', () => {
     expect(openaiProvider.embed).toHaveBeenCalledWith('芯片', 'text-embedding-3-small')
   })
 
+  it('falls back to keyword-ranked story graph search when embeddings are unavailable', async () => {
+    mockProjectGraph()
+    openaiProvider.embed.mockRejectedValue(new Error('embeddings unavailable'))
+    prisma.storyVectorIndex.findMany.mockResolvedValue([
+      { id: 'v1', sourceType: 'WORLD_FACT', sourceId: 'fact-1', text: 'memory chip crack points to tampering', embeddingJson: '[]', metadata: JSON.stringify({ title: 'chip crack' }) },
+      { id: 'v2', sourceType: 'OPEN_LOOP', sourceId: 'loop-1', text: 'rain alley clue remains open', embeddingJson: '[]', metadata: JSON.stringify({ title: 'rain alley' }) },
+    ])
+
+    const result = await service.searchStoryGraph('user-1', 'project-1', 'chip crack')
+
+    expect(result.results[0]).toEqual(expect.objectContaining({ sourceId: 'fact-1', score: expect.any(Number) }))
+    expect(result.results[0].score).toBeGreaterThan(0)
+  })
+
   it('answers story graph questions with ranked evidence and related memory', async () => {
     mockProjectGraph()
     openaiProvider.embed.mockResolvedValue([1, 0])

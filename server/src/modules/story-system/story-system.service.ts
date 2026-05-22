@@ -1348,19 +1348,27 @@ ${overrideTrace.map((trace) => `- ${trace.chapterId}: ${trace.reason}`).join('\n
       orderBy: { updatedAt: 'desc' },
       take: 200,
     }) ?? Promise.resolve([]))
-    const queryEmbedding = await this.openaiProvider.embed(normalizedQuery, 'text-embedding-3-small')
-    const results = items
-      .map((item: any) => ({
-        id: item.id,
-        sourceType: item.sourceType,
-        sourceId: item.sourceId,
-        text: item.text,
-        metadata: this.parseJson(item.metadata, {}),
-        score: this.cosineSimilarity(queryEmbedding, this.parseJson(item.embeddingJson, [])),
-      }))
-      .filter((item) => item.score > 0 || item.text.includes(normalizedQuery))
-      .sort((a, b) => b.score - a.score)
-      .slice(0, 20)
+    let results
+    try {
+      const queryEmbedding = await this.openaiProvider.embed(normalizedQuery, 'text-embedding-3-small')
+      if (!Array.isArray(queryEmbedding) || !queryEmbedding.length) {
+        throw new Error('Empty story graph query embedding')
+      }
+      results = items
+        .map((item: any) => ({
+          id: item.id,
+          sourceType: item.sourceType,
+          sourceId: item.sourceId,
+          text: item.text,
+          metadata: this.parseJson(item.metadata, {}),
+          score: this.cosineSimilarity(queryEmbedding, this.parseJson(item.embeddingJson, [])),
+        }))
+        .filter((item) => item.score > 0 || item.text.includes(normalizedQuery))
+        .sort((a, b) => b.score - a.score)
+        .slice(0, 20)
+    } catch {
+      results = this.keywordRankStoryGraphItems(items, normalizedQuery)
+    }
     return { projectId, query: normalizedQuery, results }
   }
 
@@ -1740,6 +1748,35 @@ ${this.chapterText(chapter)}`
       rightNorm += right[index] * right[index]
     }
     return leftNorm && rightNorm ? dot / (Math.sqrt(leftNorm) * Math.sqrt(rightNorm)) : 0
+  }
+
+  private keywordRankStoryGraphItems(items: any[], query: string) {
+    return items
+      .map((item: any) => {
+        const metadata = this.parseJson(item.metadata, {})
+        return {
+          id: item.id,
+          sourceType: item.sourceType,
+          sourceId: item.sourceId,
+          text: item.text,
+          metadata,
+          score: this.keywordScore(query, `${item.text} ${JSON.stringify(metadata)}`),
+        }
+      })
+      .filter((item) => item.score > 0)
+      .sort((a, b) => b.score - a.score)
+      .slice(0, 20)
+  }
+
+  private keywordScore(query: string, text: string) {
+    const normalizedQuery = query.toLowerCase()
+    const normalizedText = this.normalizeText(text).toLowerCase()
+    const tokens = normalizedQuery.split(/\s+/).filter(Boolean)
+    let score = normalizedText.includes(normalizedQuery) ? 2 : 0
+    for (const token of tokens) {
+      if (normalizedText.includes(token)) score += 1
+    }
+    return score
   }
 
   private stylePromptItems(stylePrompt: any) {
