@@ -19,7 +19,7 @@ import { Card } from '../components/ui/Card'
 import { Input } from '../components/ui/Input'
 import { Modal } from '../components/ui/Modal'
 import { chaptersApi, Chapter } from '../api/chapters'
-import { FullBookReview, PublishingAssets, storySystemApi } from '../api/story-system'
+import { FullBookAiReview, FullBookReview, PublishingAssets, storySystemApi } from '../api/story-system'
 
 const STATUS_CONFIG = {
   draft: { label: '草稿', icon: Clock, color: 'text-yellow-600 bg-yellow-50' },
@@ -42,6 +42,7 @@ export function ChapterManagement() {
   const [newChapterTitle, setNewChapterTitle] = useState('')
   const [draggedIndex, setDraggedIndex] = useState<number | null>(null)
   const [fullBookReview, setFullBookReview] = useState<FullBookReview | null>(null)
+  const [fullBookAiReview, setFullBookAiReview] = useState<FullBookAiReview | null>(null)
   const [publishingAssets, setPublishingAssets] = useState<PublishingAssets | null>(null)
   const [isStoryActionBusy, setIsStoryActionBusy] = useState(false)
 
@@ -164,6 +165,18 @@ export function ChapterManagement() {
     }
   }
 
+  const handleFullBookAiReview = async () => {
+    if (!projectId) return
+    setIsStoryActionBusy(true)
+    try {
+      setFullBookAiReview(await storySystemApi.reviewFullBookWithAi(projectId, { focus: 'ALL' }))
+    } catch (error) {
+      console.error('AI 全书审查失败:', error)
+    } finally {
+      setIsStoryActionBusy(false)
+    }
+  }
+
   const downloadExport = (exported: { content?: string; contentBase64?: string; mimeType?: string; fileName: string }) => {
     const payload = exported.contentBase64
       ? Uint8Array.from(atob(exported.contentBase64), (char) => char.charCodeAt(0))
@@ -234,6 +247,10 @@ export function ChapterManagement() {
               <ShieldCheck className="w-4 h-4 mr-2" />
               全书审查
             </Button>
+            <Button variant="outline" onClick={handleFullBookAiReview} isLoading={isStoryActionBusy}>
+              <Sparkles className="w-4 h-4 mr-2" />
+              AI 审查
+            </Button>
             <Button variant="outline" onClick={() => handleExportBook('MARKDOWN')} isLoading={isStoryActionBusy}>
               <Download className="w-4 h-4 mr-2" />
               导出 Markdown
@@ -282,6 +299,34 @@ export function ChapterManagement() {
                     </span>{' '}
                     {issue.message}
                   </div>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
+
+        {fullBookAiReview && (
+          <div className="mb-6 rounded-lg border border-gray-200 bg-white p-4">
+            <div className="flex items-center justify-between gap-4">
+              <div>
+                <div className="text-sm font-medium text-gray-900">AI 全书审查 · {fullBookAiReview.status}</div>
+                <div className="mt-1 text-xs text-gray-500">
+                  结构 {fullBookAiReview.structureIssues.length}
+                  {' · '}风格 {fullBookAiReview.styleIssues.length}
+                  {' · '}节奏 {fullBookAiReview.pacingIssues.length}
+                  {' · '}人物弧线 {fullBookAiReview.characterArcIssues.length}
+                  {' · '}伏笔 {fullBookAiReview.openLoopIssues.length}
+                </div>
+              </div>
+              <Button variant="ghost" size="sm" onClick={() => setFullBookAiReview(null)}>
+                收起
+              </Button>
+            </div>
+            <p className="mt-3 text-sm leading-6 text-gray-700">{fullBookAiReview.summary}</p>
+            {fullBookAiReview.recommendations.length > 0 && (
+              <div className="mt-3 space-y-1">
+                {fullBookAiReview.recommendations.slice(0, 5).map((item) => (
+                  <div key={item} className="text-xs text-gray-700">- {item}</div>
                 ))}
               </div>
             )}

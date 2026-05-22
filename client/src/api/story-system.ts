@@ -196,6 +196,19 @@ export interface PublishingAssets {
   }
 }
 
+export interface FullBookAiReview {
+  projectId: string
+  status: 'PASS' | 'WARNING' | 'BLOCKED' | string
+  summary: string
+  structureIssues: Array<Record<string, unknown>>
+  styleIssues: Array<Record<string, unknown>>
+  pacingIssues: Array<Record<string, unknown>>
+  characterArcIssues: Array<Record<string, unknown>>
+  openLoopIssues: Array<Record<string, unknown>>
+  recommendations: string[]
+  overrideTrace?: Array<{ repairPlanId: string; chapterId: string; reason: string }>
+}
+
 export const storySystemApi = {
   async refreshContracts(projectId: string, chapterId: string): Promise<{ contracts: StoryContract[] }> {
     const response = await apiClient.post(
@@ -331,6 +344,11 @@ export const storySystemApi = {
 
   async generatePublishingAssets(projectId: string, data: { audience?: string; tone?: string } = {}): Promise<PublishingAssets> {
     const response = await apiClient.post(`/projects/${projectId}/story-system/publishing-assets`, data)
+    return response.data
+  },
+
+  async reviewFullBookWithAi(projectId: string, data: { focus?: 'ALL' | 'STRUCTURE' | 'STYLE' | string } = {}): Promise<FullBookAiReview> {
+    const response = await apiClient.post(`/projects/${projectId}/story-system/full-book-ai-review`, data)
     return response.data
   },
 

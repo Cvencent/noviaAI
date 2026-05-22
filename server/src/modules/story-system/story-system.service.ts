@@ -9,10 +9,12 @@ import PDFDocument = require('pdfkit')
 import { PrismaService } from '../../prisma/prisma.service'
 import { AiService } from '../ai/ai.service'
 import { AIAction } from '../ai-config/dto/create-ai-config.dto'
+import { StyleApplicationService } from '../writing-styles/style-application.service'
 import {
   ContinueStoryAgentRunDto,
   CreateChapterCommitDto,
   ExportBookDto,
+  FullBookAiReviewDto,
   GeneratePublishingAssetsDto,
   RepairChapterDto,
   StartStoryAgentRunDto,
@@ -43,6 +45,7 @@ export class StorySystemService {
   constructor(
     private prisma: PrismaService,
     private aiService: AiService,
+    private styleApplicationService: StyleApplicationService,
   ) {}
 
   async refreshChapterContracts(userId: string, projectId: string, chapterId: string) {
@@ -120,6 +123,14 @@ export class StorySystemService {
     const reviewContract = contractMap.REVIEW_CONTRACT
     const currentContent = this.chapterText(chapter)
     const warnings: string[] = []
+    let styleItems: string[] = []
+    try {
+      const stylePrompt = await this.styleApplicationService.generateMultiStageStylePrompt(projectId, userId, currentContent)
+      styleItems = this.stylePromptItems(stylePrompt)
+    } catch {
+      warnings.push('style_context_unavailable')
+      styleItems = ['风格上下文暂不可用，使用项目默认写作约束。']
+    }
     const rawSections = [
       {
         layer: 'contract',
@@ -170,6 +181,15 @@ export class StorySystemService {
           ...characters.slice(0, 12).map((character: any) => `${character.name}：${character.role || '未设定'}；目标 ${character.goals || '未设定'}；缺陷 ${character.flaws || '未设定'}`),
           ...loreEntries.slice(0, 12).map((entry: any) => `${entry.name}：${entry.description}`),
         ],
+      },
+      {
+        layer: 'style',
+        title: '风格约束',
+        priority: 'high',
+        source: 'WritingStyle',
+        reason: '项目写作风格、句式、节奏和反 AI 味约束需要进入 Story System prompt。',
+        budget: 700,
+        items: styleItems,
       },
       {
         layer: 'constraints',
@@ -1012,6 +1032,98 @@ ${chapterBriefs.join('\n')}
     }
   }
 
+  async reviewFullBookWithAi(userId: string, projectId: string, dto: FullBookAiReviewDto = {}) {
+    const project = await this.loadProject(userId, projectId)
+    const [chapters, commits, openLoops, dismissedPlans] = await Promise.all([
+      this.prisma.chapter.findMany({
+        where: { projectId },
+        include: { contents: { orderBy: { order: 'asc' } } },
+        orderBy: { order: 'asc' },
+      }),
+      this.prisma.chapterCommit.findMany({
+        where: { projectId, status: 'ACCEPTED' },
+        orderBy: { createdAt: 'desc' },
+      }),
+      this.prisma.openLoop.findMany({
+        where: { projectId, status: 'OPEN' },
+        orderBy: { updatedAt: 'desc' },
+      }),
+      this.prisma.repairPlan.findMany({
+        where: { projectId, status: 'DISMISSED' },
+        orderBy: { updatedAt: 'desc' },
+      }),
+    ])
+    const latestAcceptedByChapter = new Map<string, any>()
+    for (const commit of commits.filter((item: any) => item.status === 'ACCEPTED')) {
+      if (!latestAcceptedByChapter.has(commit.chapterId)) {
+        latestAcceptedByChapter.set(commit.chapterId, commit)
+      }
+    }
+    const chapterBriefs = chapters.map((chapter: any) => {
+      const commit = latestAcceptedByChapter.get(chapter.id)
+      const text = commit?.summaryText || commit?.contentSnapshot || this.chapterText(chapter)
+      return `第 ${chapter.order + 1} 章《${chapter.title}》：${this.truncate(this.markdownText(text), 260)}`
+    })
+    const overrideTrace = dismissedPlans
+      .filter((plan: any) => plan.overrideReason)
+      .map((plan: any) => ({
+        repairPlanId: plan.id,
+        chapterId: plan.chapterId,
+        reason: plan.overrideReason,
+      }))
+    const prompt = `你是长篇小说全书审查编辑。请做 AI 级全书审查，重点覆盖结构、风格统一、节奏、人物弧线、伏笔回收。
+
+项目：${project.title}
+类型：${project.genre || '未填写'}
+简介：${project.synopsis || '未填写'}
+审查范围：${dto.focus || 'ALL'}
+
+章节摘要：
+${chapterBriefs.join('\n')}
+
+开放伏笔：
+${openLoops.map((loop: any) => `- ${loop.title || loop.key}`).join('\n') || '无'}
+
+作者已忽略的修复计划：
+${overrideTrace.map((trace) => `- ${trace.chapterId}: ${trace.reason}`).join('\n') || '无'}
+
+只输出 JSON，不要 Markdown 代码块：
+{
+  "status": "PASS | WARNING | BLOCKED",
+  "summary": "全书审查摘要",
+  "structureIssues": [],
+  "styleIssues": [],
+  "pacingIssues": [],
+  "characterArcIssues": [],
+  "openLoopIssues": [],
+  "recommendations": []
+}`
+    const aiResult = await this.aiService.chat(userId, {
+      projectId,
+      message: prompt,
+      temperature: 0.3,
+      maxTokens: 1800,
+      action: AIAction.TEXT_COMPLETION,
+    })
+    const parsed = this.parseJson(this.extractJsonText(aiResult?.response || aiResult), null)
+    if (!parsed) {
+      return this.fullBookAiReviewFallback(projectId, overrideTrace)
+    }
+
+    return {
+      projectId,
+      status: ['PASS', 'WARNING', 'BLOCKED'].includes(parsed.status) ? parsed.status : 'WARNING',
+      summary: this.normalizeText(parsed.summary, 'AI 全书审查已完成。'),
+      structureIssues: this.asArray(parsed.structureIssues),
+      styleIssues: this.asArray(parsed.styleIssues),
+      pacingIssues: this.asArray(parsed.pacingIssues),
+      characterArcIssues: this.asArray(parsed.characterArcIssues),
+      openLoopIssues: this.asArray(parsed.openLoopIssues),
+      recommendations: this.asArray(parsed.recommendations).map((item) => this.normalizeText(item)).filter(Boolean),
+      overrideTrace,
+    }
+  }
+
   private async executeRunStep(userId: string, run: any, stepType: StoryAgentStepType) {
     const steps = await this.prisma.storyAgentStep.findMany({
       where: { runId: run.id },
@@ -1335,6 +1447,30 @@ ${this.chapterText(chapter)}`
       project.genre ? `${project.genre} genre hook` : `${project.title} story premise`,
       ...tags.map((tag) => `${tag} element`),
     ].slice(0, 6)
+  }
+
+  private stylePromptItems(stylePrompt: any) {
+    const source = this.normalizeText(stylePrompt?.stage3_styleRules || stylePrompt?.fullPrompt)
+    return source
+      .split(/\n+/)
+      .map((line) => line.replace(/^[-\d.、\s]+/, '').trim())
+      .filter(Boolean)
+      .slice(0, 10)
+  }
+
+  private fullBookAiReviewFallback(projectId: string, overrideTrace: any[]) {
+    return {
+      projectId,
+      status: 'WARNING',
+      summary: 'AI 审查结果无法解析，已返回保守审查结果。',
+      structureIssues: [],
+      styleIssues: [],
+      pacingIssues: [],
+      characterArcIssues: [],
+      openLoopIssues: [],
+      recommendations: ['请重新运行全书 AI 审查'],
+      overrideTrace,
+    }
   }
 
   private escapeXml(value: unknown) {

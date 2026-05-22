@@ -160,3 +160,9 @@ export class GeneratePublishingAssetsDto {
   @IsOptional()
   tone?: string
 }
+
+export class FullBookAiReviewDto {
+  @IsString()
+  @IsOptional()
+  focus?: 'ALL' | 'STRUCTURE' | 'STYLE' | string
+}

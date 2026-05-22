@@ -6,6 +6,7 @@ describe('StorySystemService', () => {
   let service: StorySystemService
   let prisma: any
   let aiService: any
+  let styleApplicationService: any
 
   const project = {
     id: 'project-1',
@@ -138,7 +139,11 @@ describe('StorySystemService', () => {
       chat: jest.fn(),
     }
 
-    service = new StorySystemService(prisma, aiService)
+    styleApplicationService = {
+      generateMultiStageStylePrompt: jest.fn(),
+    }
+
+    service = new StorySystemService(prisma, aiService, styleApplicationService)
   })
 
   function mockProjectGraph() {
@@ -203,8 +208,12 @@ describe('StorySystemService', () => {
     expect(JSON.parse(chapterBrief.payload).chapterDirective.mustCoverNodes).toContain('逼问沈遥关于记忆芯片的秘密')
   })
 
-  it('builds a layered context pack with contract, working, episodic, semantic, and constraint sections', async () => {
+  it('builds a layered context pack with contract, working, episodic, semantic, style, and constraint sections', async () => {
     mockProjectGraph()
+    styleApplicationService.generateMultiStageStylePrompt.mockResolvedValue({
+      stage3_styleRules: '短句推进；对话比例约40%；避免解释腔。',
+      fullPrompt: '完整风格提示',
+    })
     prisma.storyContract.findMany.mockResolvedValue([
       {
         type: 'CHAPTER_BRIEF',
@@ -234,8 +243,14 @@ describe('StorySystemService', () => {
       'working',
       'episodic',
       'semantic',
+      'style',
       'constraints',
     ])
+    const styleSection = pack.sections.find((section: any) => section.layer === 'style')
+    expect(styleSection.items).toEqual(expect.arrayContaining([
+      expect.stringContaining('短句推进'),
+      expect.stringContaining('对话比例约40%'),
+    ]))
     expect(prisma.storyContextPack.create).toHaveBeenCalledWith({
       data: expect.objectContaining({
         projectId: 'project-1',
@@ -243,6 +258,18 @@ describe('StorySystemService', () => {
         status: 'READY',
       }),
     })
+  })
+
+  it('keeps context pack ready with a warning when style section cannot be generated', async () => {
+    mockProjectGraph()
+    styleApplicationService.generateMultiStageStylePrompt.mockRejectedValue(new Error('style unavailable'))
+    prisma.storyContract.findMany.mockResolvedValue([])
+    prisma.storyContextPack.create.mockImplementation(({ data }: any) => Promise.resolve({ id: 'pack-1', ...data }))
+
+    const pack = await service.buildContextPack('user-1', 'project-1', 'chapter-1')
+
+    expect(pack.sections.map((section: any) => section.layer)).toContain('style')
+    expect(pack.warnings).toContain('style_context_unavailable')
   })
 
   it('budgets context pack sections and records warnings for trimmed items', async () => {
@@ -962,6 +989,53 @@ describe('StorySystemService', () => {
     expect(assets.synopsis).toBe('A tighter market-ready synopsis.')
     expect(assets.coverPrompt).toBe('Rainy neon port cover')
     expect(assets.sellingPoints).toEqual(['Urban suspense genre hook', 'memory element', 'mystery element'])
+  })
+
+  it('runs a full-book AI review with structured issue groups and override traces', async () => {
+    mockProjectGraph()
+    prisma.chapter.findMany.mockResolvedValue([
+      { id: 'chapter-1', title: '旧港质问', order: 0, contents: [{ order: 0, content: '林澄拿出芯片。' }] },
+      { id: 'chapter-2', title: '雨巷追踪', order: 1, contents: [{ order: 0, content: '沈遥消失在雨巷。' }] },
+    ])
+    prisma.chapterCommit.findMany.mockResolvedValue([
+      { id: 'commit-1', chapterId: 'chapter-1', status: 'ACCEPTED', contentSnapshot: '林澄拿出芯片。', summaryText: '旧港出现芯片。' },
+      { id: 'commit-2', chapterId: 'chapter-2', status: 'ACCEPTED', contentSnapshot: '沈遥消失在雨巷。', summaryText: '沈遥消失。' },
+    ])
+    prisma.openLoop.findMany.mockResolvedValue([{ id: 'loop-1', key: '芯片裂纹', title: '芯片裂纹', status: 'OPEN' }])
+    prisma.repairPlan.findMany.mockResolvedValue([{ id: 'repair-1', chapterId: 'chapter-1', status: 'DISMISSED', overrideReason: '作者保留悬念' }])
+    aiService.chat.mockResolvedValue({
+      response: '```json\n{"status":"WARNING","summary":"结构基本成立，但中段节奏偏急。","structureIssues":[{"severity":"NORMAL","message":"第二章承接略跳"}],"styleIssues":[{"severity":"MINOR","message":"雨巷段落语气偏散"}],"pacingIssues":[],"characterArcIssues":[],"openLoopIssues":[{"severity":"NORMAL","message":"芯片裂纹尚未回收"}],"recommendations":["补一段过渡"]}\n```',
+    })
+
+    const review = await service.reviewFullBookWithAi('user-1', 'project-1', { focus: 'ALL' })
+
+    expect(review.status).toBe('WARNING')
+    expect(review.summary).toContain('结构基本成立')
+    expect(review.structureIssues).toEqual([expect.objectContaining({ message: '第二章承接略跳' })])
+    expect(review.styleIssues).toEqual([expect.objectContaining({ message: '雨巷段落语气偏散' })])
+    expect(review.openLoopIssues).toEqual([expect.objectContaining({ message: '芯片裂纹尚未回收' })])
+    expect(review.recommendations).toEqual(['补一段过渡'])
+    expect(review.overrideTrace).toEqual([{ repairPlanId: 'repair-1', chapterId: 'chapter-1', reason: '作者保留悬念' }])
+    expect(aiService.chat).toHaveBeenCalledWith('user-1', expect.objectContaining({
+      projectId: 'project-1',
+      message: expect.stringContaining('作者保留悬念'),
+    }))
+  })
+
+  it('falls back full-book AI review when AI returns malformed JSON', async () => {
+    mockProjectGraph()
+    prisma.chapter.findMany.mockResolvedValue([{ id: 'chapter-1', title: '旧港质问', order: 0, contents: [] }])
+    prisma.chapterCommit.findMany.mockResolvedValue([])
+    prisma.openLoop.findMany.mockResolvedValue([])
+    prisma.repairPlan.findMany.mockResolvedValue([])
+    aiService.chat.mockResolvedValue({ response: 'not json' })
+
+    const review = await service.reviewFullBookWithAi('user-1', 'project-1', { focus: 'STYLE' })
+
+    expect(review.status).toBe('WARNING')
+    expect(review.summary).toContain('AI 审查结果无法解析')
+    expect(review.styleIssues).toEqual([])
+    expect(review.recommendations).toContain('请重新运行全书 AI 审查')
   })
 
   it('creates a repair agent step from an open repair plan without changing chapter content', async () => {

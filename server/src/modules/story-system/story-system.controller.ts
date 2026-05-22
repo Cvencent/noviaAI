@@ -7,6 +7,7 @@ import {
   CreateChapterCommitDto,
   DismissRepairPlanDto,
   ExportBookDto,
+  FullBookAiReviewDto,
   GeneratePublishingAssetsDto,
   RepairChapterDto,
   StartStoryAgentRunDto,
@@ -207,6 +208,15 @@ export class StorySystemController {
     @Body() dto: GeneratePublishingAssetsDto,
   ) {
     return this.storySystemService.generatePublishingAssets(user.id, projectId, dto)
+  }
+
+  @Post('story-system/full-book-ai-review')
+  reviewFullBookWithAi(
+    @CurrentUser() user: any,
+    @Param('projectId') projectId: string,
+    @Body() dto: FullBookAiReviewDto,
+  ) {
+    return this.storySystemService.reviewFullBookWithAi(user.id, projectId, dto)
   }
 
   @Post('chapters/:chapterId/story-system/agent-runs')
