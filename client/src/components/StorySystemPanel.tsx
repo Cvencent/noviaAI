@@ -94,6 +94,7 @@ export function StorySystemPanel({
   const [run, setRun] = useState<StoryAgentRun | null>(null)
   const [instruction, setInstruction] = useState('')
   const [repairPreview, setRepairPreview] = useState('')
+  const [activeRepairPlanId, setActiveRepairPlanId] = useState<string | null>(null)
   const [overrideReasons, setOverrideReasons] = useState<Record<string, string>>({})
   const [isBusy, setIsBusy] = useState(false)
   const [message, setMessage] = useState('')
@@ -226,6 +227,7 @@ export function StorySystemPanel({
       instruction: instruction.trim() || undefined,
     })
     setRepairPreview(result.repairedText)
+    setActiveRepairPlanId(result.repairPlanId)
     await loadStatus()
   })
 
@@ -257,6 +259,7 @@ export function StorySystemPanel({
       await storySystemApi.createCommit(projectId, chapterId, {
         content: repairPreview,
         runId: run?.id,
+        repairPlanId: activeRepairPlanId || undefined,
         reviewResult: result,
         extractionResult: {
           acceptedEvents: [{ eventType: 'REPAIR_ACCEPTED', subject: 'chapter' }],
@@ -266,6 +269,7 @@ export function StorySystemPanel({
         },
       })
       setRepairPreview('')
+      setActiveRepairPlanId(null)
       setCommits(await storySystemApi.listCommits(projectId, chapterId))
       await loadStatus()
     }

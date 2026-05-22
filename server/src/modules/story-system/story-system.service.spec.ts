@@ -662,6 +662,32 @@ describe('StorySystemService', () => {
     expect(prisma.storyRelation.upsert).toHaveBeenCalled()
   })
 
+  it('marks a repair plan applied when its repaired content is accepted', async () => {
+    mockProjectGraph()
+    prisma.storyContract.findMany.mockResolvedValue([
+      { type: 'CHAPTER_BRIEF', payload: JSON.stringify({ chapterDirective: {} }) },
+      { type: 'REVIEW_CONTRACT', payload: JSON.stringify({ blockingRules: [] }) },
+    ])
+    prisma.chapterCommit.create.mockImplementation(({ data }: any) => Promise.resolve({ id: 'commit-accepted', ...data }))
+    prisma.chapterSummary.create.mockResolvedValue({ id: 'summary-1' })
+
+    const commit = await service.createChapterCommit('user-1', 'project-1', 'chapter-1', {
+      content: 'Repaired chapter text.',
+      repairPlanId: 'repair-1',
+      reviewResult: { issues: [] },
+      extractionResult: { summaryText: 'Repaired chapter summary.' },
+    })
+
+    expect(commit.repairPlanId).toBe('repair-1')
+    expect(prisma.repairPlan.update).toHaveBeenCalledWith({
+      where: { id: 'repair-1' },
+      data: {
+        status: 'APPLIED',
+        commitId: 'commit-accepted',
+      },
+    })
+  })
+
   it('extracts default projection facts from an accepted commit when no extraction result is provided', async () => {
     mockProjectGraph()
     prisma.character.findMany.mockResolvedValue([

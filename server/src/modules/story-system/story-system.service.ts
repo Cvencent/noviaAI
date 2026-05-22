@@ -552,7 +552,7 @@ ${dto.content}`
         projectId,
         chapterId,
         runId: dto.runId,
-        repairPlanId: undefined,
+        repairPlanId: status === 'ACCEPTED' ? dto.repairPlanId : undefined,
         status,
         contentSnapshot: dto.content,
         blockingReasons: blockingReasons.length ? JSON.stringify(blockingReasons) : undefined,
@@ -568,6 +568,7 @@ ${dto.content}`
     })
 
     if (status === 'ACCEPTED') {
+      await this.markRepairPlanApplied(dto.repairPlanId, commit.id)
       const finalProjectionStatus = await this.applyAcceptedProjections(
         projectId,
         chapterId,
@@ -822,6 +823,21 @@ ${dto.content}`
         overrideReason: reason,
       },
     })
+  }
+
+  private async markRepairPlanApplied(repairPlanId: string | undefined, commitId: string) {
+    if (!repairPlanId) return
+    try {
+      await this.prisma.repairPlan.update({
+        where: { id: repairPlanId },
+        data: {
+          status: 'APPLIED',
+          commitId,
+        },
+      })
+    } catch {
+      // The accepted commit remains valid even if the repair trace update fails.
+    }
   }
 
   async listOpenLoops(userId: string, projectId: string) {

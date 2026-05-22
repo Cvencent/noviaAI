@@ -335,6 +335,7 @@ export const storySystemApi = {
   async createCommit(projectId: string, chapterId: string, data: {
     content: string
     runId?: string
+    repairPlanId?: string
     reviewResult?: { issues?: Array<{ severity?: string; message?: string; blocking?: boolean }> }
     extractionResult?: {
       acceptedEvents?: unknown[]

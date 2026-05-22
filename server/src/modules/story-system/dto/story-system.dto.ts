@@ -116,6 +116,10 @@ export class CreateChapterCommitDto {
   @IsOptional()
   runId?: string
 
+  @IsString()
+  @IsOptional()
+  repairPlanId?: string
+
   @ValidateNested()
   @Type(() => StoryReviewResultDto)
   @IsOptional()
