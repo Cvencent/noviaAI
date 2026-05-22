@@ -22,6 +22,7 @@ import { TimelineManagement } from '@/pages/TimelineManagement'
 import { EnhancedCharacterNetwork } from '@/pages/EnhancedCharacterNetwork'
 import { WritingStyleTestPage } from '@/pages/WritingStyleTest'
 import { StyleHowItWorks } from '@/pages/StyleHowItWorks'
+import { ReaderExperience } from '@/pages/ReaderExperience'
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -79,6 +80,7 @@ function App() {
           <Route path="chapters" element={<ChapterManagement />} />
           <Route path="chapters/:chapterId" element={<ChapterEditor />} />
           <Route path="consistency-check" element={<ConsistencyCheck />} />
+          <Route path="reader-experience" element={<ReaderExperience />} />
           <Route path="usage-logs" element={<UsageLogs />} />
           <Route path="plots" element={<PlotManagement />} />
           <Route path="scenes" element={<SceneManagement />} />

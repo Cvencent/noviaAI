@@ -9,9 +9,17 @@ import { AiService } from '../ai/ai.service'
 import { AIAction } from '../ai-config/dto/create-ai-config.dto'
 import { ContinueDialogueSessionDto, CreateDialogueSessionDto } from './dto'
 
-interface ParsedDialogueMessage {
+export interface ParsedDialogueMessage {
   speaker?: string
   content?: string
+}
+
+interface ParsedQualityIssue {
+  category: string
+  severity: string
+  message: string
+  speaker?: string
+  evidence?: string
 }
 
 @Injectable()
@@ -183,6 +191,7 @@ export class DialogueSessionsService {
     }
 
     await this.prisma.dialogueMessage.createMany({ data: validMessages })
+    await this.createQualityReport(projectId, session.id, parsed.oocWarnings)
 
     return this.prisma.dialogueSession.update({
       where: { id: sessionId },
@@ -196,6 +205,61 @@ export class DialogueSessionsService {
         },
       },
     })
+  }
+
+  async listQualityReports(userId: string, projectId: string, sessionId: string) {
+    await this.findOne(userId, projectId, sessionId)
+    return this.prisma.dialogueQualityReport.findMany({
+      where: { projectId, sessionId },
+      include: { issues: true },
+      orderBy: { createdAt: 'desc' },
+    })
+  }
+
+  async improveFromQualityReport(
+    userId: string,
+    projectId: string,
+    sessionId: string,
+    dto: { instruction?: string },
+  ) {
+    const session = await this.findOne(userId, projectId, sessionId)
+    const characterIds = this.parseCharacterIds(session.characterIds)
+    const [characters, reports] = await Promise.all([
+      this.prisma.character.findMany({
+        where: { projectId, id: { in: characterIds } },
+        include: {
+          relationshipsFrom: {
+            include: { toCharacter: { select: { id: true, name: true } } },
+          },
+          relationshipsTo: {
+            include: { fromCharacter: { select: { id: true, name: true } } },
+          },
+        },
+      }),
+      this.prisma.dialogueQualityReport.findMany({
+        where: { projectId, sessionId },
+        include: { issues: true },
+        orderBy: { createdAt: 'desc' },
+        take: 1,
+      }),
+    ])
+    const issues = reports[0]?.issues || []
+    const prompt = `${this.buildContinuePrompt(session, characters, {
+      instruction: dto.instruction,
+      rounds: 2,
+    })}
+
+质量问题：
+${issues.map((issue: any) => `- [${issue.category}/${issue.severity}] ${issue.message}`).join('\n') || '- 暂无质量问题，请加强角色差异和冲突推进。'}
+
+请只返回改写候选 JSON，不要保存，不要解释。`
+    const aiResult = await this.aiService.chat(userId, {
+      projectId,
+      message: prompt,
+      temperature: 0.75,
+      action: AIAction.DIALOGUE_GENERATION,
+    })
+    return this.parseAiDialogue(aiResult.response)
   }
 
   async pause(userId: string, projectId: string, sessionId: string) {
@@ -324,6 +388,49 @@ ${history || '暂无'}
         oocWarnings: ['AI 返回格式不是标准 JSON，已作为旁白文本保存。'],
       }
     }
+  }
+
+  private async createQualityReport(projectId: string, sessionId: string, warnings: string[]) {
+    const issues = this.normalizeQualityIssues(warnings)
+    const report = await this.prisma.dialogueQualityReport.create({
+      data: {
+        projectId,
+        sessionId,
+        status: issues.length ? 'WARN' : 'PASS',
+        summary: issues.length ? `${issues.length} 个对话质量提醒` : '未发现明显对话质量问题',
+      },
+    })
+    if (issues.length) {
+      await this.prisma.dialogueQualityIssue.createMany({
+        data: issues.map((issue) => ({
+          reportId: report.id,
+          category: issue.category,
+          severity: issue.severity,
+          message: issue.message,
+          speaker: issue.speaker,
+          evidence: issue.evidence,
+        })),
+      })
+    }
+    return report
+  }
+
+  private normalizeQualityIssues(warnings: string[]): ParsedQualityIssue[] {
+    return warnings
+      .filter((warning) => warning.trim().length > 0)
+      .map((warning) => ({
+        category: this.inferQualityCategory(warning),
+        severity: /泄密|越界|严重|OOC/.test(warning) ? 'CRITICAL' : 'NORMAL',
+        message: warning,
+      }))
+  }
+
+  private inferQualityCategory(warning: string) {
+    if (/泄密|秘密|越界/.test(warning)) return 'SECRET_LEAK'
+    if (/趋同|声音|语气相似/.test(warning)) return 'VOICE_SIMILARITY'
+    if (/冲突|推进/.test(warning)) return 'LOW_CONFLICT'
+    if (/格式|JSON/.test(warning)) return 'FORMAT'
+    return 'OOC'
   }
 
   private parseCharacterIds(value: string) {

@@ -10,6 +10,7 @@ import { AIAction } from '../ai-config/dto/create-ai-config.dto'
 import {
   ContinueStoryAgentRunDto,
   CreateChapterCommitDto,
+  RepairChapterDto,
   StartStoryAgentRunDto,
   StoryAgentMode,
   StoryAgentStepType,
@@ -214,9 +215,6 @@ export class StorySystemService {
     if (missing.length) {
       blockingReasons.push(`缺少 Story Contract: ${missing.join(', ')}`)
     }
-    if (!text.trim()) {
-      blockingReasons.push('当前章节正文为空，无法进入审查和提交链路')
-    }
     if (this.findPlaceholders(text).length) {
       blockingReasons.push('当前章节仍包含占位符或待补齐文本')
     }
@@ -307,6 +305,70 @@ export class StorySystemService {
       contextPackId: contextPack.id,
       preflight,
     }
+  }
+
+  async repairChapter(
+    userId: string,
+    projectId: string,
+    chapterId: string,
+    dto: RepairChapterDto,
+  ) {
+    await this.loadProjectChapter(userId, projectId, chapterId)
+    const repairPlan = dto.repairPlanId
+      ? await this.prisma.repairPlan.findFirst({
+          where: { id: dto.repairPlanId, projectId, chapterId, status: 'OPEN' },
+        })
+      : await this.prisma.repairPlan.findFirst({
+          where: { projectId, chapterId, status: 'OPEN' },
+          orderBy: { createdAt: 'desc' },
+        })
+    if (!repairPlan) {
+      throw new NotFoundException('没有可用的修复计划')
+    }
+
+    const run = await this.prisma.storyAgentRun.create({
+      data: {
+        projectId,
+        chapterId,
+        mode: StoryAgentMode.FULL_WRITE,
+        status: 'RUNNING',
+        currentStep: 'REPAIR',
+        instruction: dto.instruction,
+      },
+      include: { steps: { orderBy: { order: 'asc' } } },
+    })
+    const prompt = `你是 noviaAI 的章节修复 Agent。请根据 RepairPlan 修复当前正文，只输出可由作者审阅后应用的修复文本，不要覆盖原文。
+
+作者指令：
+${dto.instruction || '无'}
+
+RepairPlan:
+${repairPlan.steps}
+
+当前正文：
+${dto.content}`
+    const aiResult = await this.aiService.chat(userId, {
+      projectId,
+      message: prompt,
+      temperature: 0.65,
+      action: AIAction.TEXT_COMPLETION,
+    })
+    const repairedText = aiResult.response || ''
+    await this.prisma.storyAgentStep.create({
+      data: {
+        runId: run.id,
+        stepType: 'REPAIR',
+        status: 'COMPLETED',
+        input: JSON.stringify({ content: dto.content, repairPlanId: repairPlan.id, instruction: dto.instruction }),
+        output: JSON.stringify({ content: repairedText }),
+        order: 0,
+      },
+    })
+    await this.prisma.storyAgentRun.update({
+      where: { id: run.id },
+      data: { status: 'PAUSED', currentStep: StoryAgentStepType.REVIEW },
+    })
+    return { repairedText, runId: run.id, repairPlanId: repairPlan.id }
   }
 
   async startAgentRun(
@@ -404,6 +466,9 @@ export class StorySystemService {
     dto: CreateChapterCommitDto,
   ) {
     await this.loadProjectChapter(userId, projectId, chapterId)
+    if (!dto.content.trim()) {
+      throw new BadRequestException('当前章节正文为空，无法提交事实沉淀')
+    }
     const contracts = await this.getContracts(projectId, chapterId)
     const contractMap = this.contractMap(contracts)
     const chapterDirective = contractMap.CHAPTER_BRIEF?.chapterDirective || {}
@@ -420,6 +485,10 @@ export class StorySystemService {
     const blockingIssues = this.asArray((reviewResult as any).issues).filter(
       (issue: any) => issue?.blocking || issue?.severity === 'CRITICAL',
     )
+    const normalizedIssues = this.normalizeReviewIssues(blockingIssues, missedNodes, forbiddenHits)
+    const blockingReasons = normalizedIssues
+      .filter((issue) => issue.blocking)
+      .map((issue) => issue.message)
     const status = missedNodes.length || forbiddenHits.length || blockingIssues.length
       ? 'REJECTED'
       : 'ACCEPTED'
@@ -431,9 +500,11 @@ export class StorySystemService {
     }
     const summaryText = extractionResult.summaryText || this.buildFallbackSummary(dto.content)
     const projectionStatus = {
-      state: status === 'ACCEPTED' ? 'DONE' : 'SKIPPED',
       summary: status === 'ACCEPTED' ? 'DONE' : 'SKIPPED',
-      memory: status === 'ACCEPTED' ? 'DONE' : 'SKIPPED',
+      event: status === 'ACCEPTED' ? 'DONE' : 'SKIPPED',
+      state: status === 'ACCEPTED' ? 'DONE' : 'SKIPPED',
+      openLoop: status === 'ACCEPTED' ? 'DONE' : 'SKIPPED',
+      graph: status === 'ACCEPTED' ? 'DONE' : 'SKIPPED',
       vector: 'SKIPPED',
     }
 
@@ -442,8 +513,10 @@ export class StorySystemService {
         projectId,
         chapterId,
         runId: dto.runId,
+        repairPlanId: undefined,
         status,
         contentSnapshot: dto.content,
+        blockingReasons: blockingReasons.length ? JSON.stringify(blockingReasons) : undefined,
         reviewResult: JSON.stringify(reviewResult),
         fulfillmentResult: JSON.stringify(fulfillmentResult),
         extractionResult: JSON.stringify(extractionResult),
@@ -456,19 +529,9 @@ export class StorySystemService {
     })
 
     if (status === 'ACCEPTED') {
-      await this.prisma.chapterSummary.create({
-        data: {
-          chapterId,
-          summary: summaryText,
-        },
-      })
-      await this.prisma.chapter.update({
-        where: { id: chapterId },
-        data: {
-          summary: summaryText,
-          status: 'COMMITTED',
-        },
-      })
+      await this.applyAcceptedProjections(projectId, chapterId, commit.id, summaryText, extractionResult)
+    } else {
+      return this.createRejectedCommitWorkflow(projectId, chapterId, commit, normalizedIssues)
     }
 
     return commit
@@ -536,6 +599,91 @@ export class StorySystemService {
       where: { projectId, chapterId },
       orderBy: { createdAt: 'desc' },
     })
+  }
+
+  async rebuildProjections(userId: string, projectId: string) {
+    await this.loadProject(userId, projectId)
+    const commits = await this.prisma.chapterCommit.findMany({
+      where: { projectId, status: 'ACCEPTED' },
+      orderBy: { createdAt: 'asc' },
+    })
+    for (const commit of commits) {
+      const extractionResult = this.parseJson(commit.extractionResult, {})
+      await this.applyAcceptedProjections(
+        projectId,
+        commit.chapterId,
+        commit.id,
+        commit.summaryText || extractionResult.summaryText || this.buildFallbackSummary(commit.contentSnapshot),
+        extractionResult,
+      )
+    }
+    return { projectId, rebuiltCommits: commits.length }
+  }
+
+  async listReviewReports(userId: string, projectId: string, chapterId: string) {
+    await this.loadProjectChapter(userId, projectId, chapterId)
+    return this.prisma.reviewReport.findMany({
+      where: { projectId, chapterId },
+      include: { issues: true },
+      orderBy: { createdAt: 'desc' },
+    })
+  }
+
+  async listRepairPlans(userId: string, projectId: string, chapterId: string) {
+    await this.loadProjectChapter(userId, projectId, chapterId)
+    return this.prisma.repairPlan.findMany({
+      where: { projectId, chapterId },
+      orderBy: { createdAt: 'desc' },
+    })
+  }
+
+  async listOpenLoops(userId: string, projectId: string) {
+    await this.loadProject(userId, projectId)
+    return this.prisma.openLoop.findMany({
+      where: { projectId },
+      orderBy: { updatedAt: 'desc' },
+    })
+  }
+
+  async listGraphEntities(userId: string, projectId: string) {
+    await this.loadProject(userId, projectId)
+    return this.prisma.storyEntity.findMany({
+      where: { projectId },
+      orderBy: { updatedAt: 'desc' },
+    })
+  }
+
+  async getGraphEntity(userId: string, projectId: string, entityId: string) {
+    await this.loadProject(userId, projectId)
+    const entity = await this.prisma.storyEntity.findFirst({
+      where: { id: entityId, projectId },
+      include: { mentions: true, relationsFrom: true, relationsTo: true },
+    })
+    if (!entity) {
+      throw new NotFoundException('Story entity 不存在')
+    }
+    return entity
+  }
+
+  async findGraphPath(userId: string, projectId: string, from: string, to: string) {
+    await this.loadProject(userId, projectId)
+    const [fromEntity, toEntity] = await Promise.all([
+      this.prisma.storyEntity.findFirst({ where: { projectId, name: from } }),
+      this.prisma.storyEntity.findFirst({ where: { projectId, name: to } }),
+    ])
+    if (!fromEntity || !toEntity) {
+      return { from: fromEntity, to: toEntity, relations: [] }
+    }
+    const relations = await this.prisma.storyRelation.findMany({
+      where: {
+        projectId,
+        OR: [
+          { fromEntityId: fromEntity.id, toEntityId: toEntity.id },
+          { fromEntityId: toEntity.id, toEntityId: fromEntity.id },
+        ],
+      },
+    })
+    return { from: fromEntity, to: toEntity, relations }
   }
 
   private async executeRunStep(userId: string, run: any, stepType: StoryAgentStepType) {
@@ -633,13 +781,7 @@ ${this.chapterText(chapter)}`
   }
 
   private async loadProjectChapter(userId: string, projectId: string, chapterId: string) {
-    const project = await this.prisma.project.findUnique({ where: { id: projectId } })
-    if (!project) {
-      throw new NotFoundException('项目不存在')
-    }
-    if (project.userId !== userId) {
-      throw new ForbiddenException('没有权限访问此项目')
-    }
+    const project = await this.loadProject(userId, projectId)
     const chapter = await this.prisma.chapter.findFirst({
       where: { id: chapterId, projectId },
       include: {
@@ -651,6 +793,17 @@ ${this.chapterText(chapter)}`
       throw new NotFoundException('章节不存在')
     }
     return { project, chapter }
+  }
+
+  private async loadProject(userId: string, projectId: string) {
+    const project = await this.prisma.project.findUnique({ where: { id: projectId } })
+    if (!project) {
+      throw new NotFoundException('项目不存在')
+    }
+    if (project.userId !== userId) {
+      throw new ForbiddenException('没有权限访问此项目')
+    }
+    return project
   }
 
   private async loadRun(userId: string, projectId: string, runId: string) {
@@ -802,6 +955,228 @@ ${this.chapterText(chapter)}`
   private buildFallbackSummary(content: string) {
     const clean = content.replace(/<[^>]*>/g, '').replace(/\s+/g, ' ').trim()
     return this.truncate(clean, 120) || '本章暂无可投影摘要。'
+  }
+
+  private normalizeReviewIssues(blockingIssues: any[], missedNodes: string[], forbiddenHits: string[]) {
+    return [
+      ...missedNodes.map((node) => ({
+        category: 'FULFILLMENT',
+        severity: 'CRITICAL',
+        blocking: true,
+        message: `漏掉本章必须覆盖节点：${node}`,
+        evidence: node,
+        suggestion: `补写与「${node}」直接相关的行动或信息。`,
+      })),
+      ...forbiddenHits.map((zone) => ({
+        category: 'CONTINUITY',
+        severity: 'CRITICAL',
+        blocking: true,
+        message: `命中本章禁区：${zone}`,
+        evidence: zone,
+        suggestion: '删除或改写该片段，保留悬念和铺垫。',
+      })),
+      ...blockingIssues.map((issue) => ({
+        category: issue.category || 'STYLE',
+        severity: issue.severity || 'CRITICAL',
+        blocking: issue.blocking ?? true,
+        message: issue.message || '审查发现阻断问题',
+        evidence: issue.evidence,
+        suggestion: issue.suggestion || '按审查意见修订后重新提交。',
+        startOffset: issue.startOffset,
+        endOffset: issue.endOffset,
+      })),
+    ]
+  }
+
+  private async createRejectedCommitWorkflow(
+    projectId: string,
+    chapterId: string,
+    commit: any,
+    issues: any[],
+  ) {
+    const report = await this.prisma.reviewReport.create({
+      data: {
+        projectId,
+        chapterId,
+        commitId: commit.id,
+        status: 'BLOCKED',
+        summary: `${issues.filter((issue) => issue.blocking).length} 个阻断问题需要修复`,
+      },
+    })
+    if (issues.length) {
+      await this.prisma.reviewIssue.createMany({
+        data: issues.map((issue) => ({
+          reportId: report.id,
+          category: issue.category,
+          severity: issue.severity,
+          blocking: issue.blocking,
+          message: issue.message,
+          evidence: issue.evidence,
+          suggestion: issue.suggestion,
+          startOffset: issue.startOffset,
+          endOffset: issue.endOffset,
+        })),
+      })
+    }
+    const plan = await this.prisma.repairPlan.create({
+      data: {
+        projectId,
+        chapterId,
+        commitId: commit.id,
+        reportId: report.id,
+        status: 'OPEN',
+        steps: JSON.stringify(issues.map((issue, index) => ({
+          order: index + 1,
+          issue: issue.message,
+          action: issue.suggestion || '修订对应片段后重新审查。',
+        }))),
+        targetRanges: JSON.stringify(
+          issues
+            .filter((issue) => typeof issue.startOffset === 'number' || typeof issue.endOffset === 'number')
+            .map((issue) => ({ startOffset: issue.startOffset, endOffset: issue.endOffset })),
+        ),
+      },
+    })
+    const updatedCommit = await this.prisma.chapterCommit.update({
+      where: { id: commit.id },
+      data: {
+        repairPlanId: plan.id,
+        blockingReasons: JSON.stringify(issues.filter((issue) => issue.blocking).map((issue) => issue.message)),
+      },
+    })
+    return { ...commit, ...updatedCommit }
+  }
+
+  private async applyAcceptedProjections(
+    projectId: string,
+    chapterId: string,
+    commitId: string,
+    summaryText: string,
+    extractionResult: any,
+  ) {
+    await this.prisma.chapterSummary.create({
+      data: {
+        chapterId,
+        summary: summaryText,
+      },
+    })
+    await this.prisma.chapter.update({
+      where: { id: chapterId },
+      data: {
+        summary: summaryText,
+        status: 'COMMITTED',
+      },
+    })
+
+    const acceptedEvents = this.asArray(extractionResult.acceptedEvents)
+    if (acceptedEvents.length) {
+      await this.prisma.storyEvent.createMany({
+        data: acceptedEvents.map((event: any) => ({
+          projectId,
+          chapterId,
+          commitId,
+          eventType: event.eventType || event.type || 'CHAPTER_EVENT',
+          subject: event.subject || 'chapter',
+          payload: JSON.stringify(event.payload || event),
+        })),
+      })
+    }
+
+    const stateDeltas = this.asArray(extractionResult.stateDeltas)
+    if (stateDeltas.length) {
+      await this.prisma.characterState.createMany({
+        data: stateDeltas.map((delta: any) => ({
+          projectId,
+          chapterId,
+          commitId,
+          characterName: delta.characterName || delta.entity || delta.name || '未知角色',
+          field: delta.field || 'state',
+          value: String(delta.value ?? delta.description ?? ''),
+        })),
+      })
+    }
+
+    for (const loop of this.asArray(extractionResult.openLoops)) {
+      const key = loop.key || loop.title
+      if (!key) continue
+      await this.prisma.openLoop.upsert({
+        where: { projectId_key: { projectId, key } },
+        create: {
+          projectId,
+          chapterId,
+          commitId,
+          key,
+          title: loop.title || key,
+          status: loop.status || 'OPEN',
+          payload: JSON.stringify(loop),
+        },
+        update: {
+          chapterId,
+          commitId,
+          title: loop.title || key,
+          status: loop.status || 'OPEN',
+          payload: JSON.stringify(loop),
+        },
+      })
+    }
+
+    const entityByName = new Map<string, any>()
+    for (const entity of this.asArray(extractionResult.entities)) {
+      if (!entity.name) continue
+      const saved = await this.prisma.storyEntity.upsert({
+        where: { projectId_name: { projectId, name: entity.name } },
+        create: {
+          projectId,
+          name: entity.name,
+          type: entity.type || 'CONCEPT',
+          aliases: entity.aliases ? JSON.stringify(entity.aliases) : undefined,
+          payload: JSON.stringify(entity),
+        },
+        update: {
+          type: entity.type || 'CONCEPT',
+          aliases: entity.aliases ? JSON.stringify(entity.aliases) : undefined,
+          payload: JSON.stringify(entity),
+        },
+      })
+      entityByName.set(entity.name, saved)
+    }
+    if (entityByName.size) {
+      await this.prisma.entityMention.createMany({
+        data: [...entityByName.values()].map((entity) => ({
+          projectId,
+          entityId: entity.id,
+          chapterId,
+          commitId,
+          excerpt: summaryText,
+        })),
+      })
+    }
+
+    for (const relation of this.asArray(extractionResult.relations)) {
+      const from = entityByName.get(relation.from)
+      const to = entityByName.get(relation.to)
+      if (!from || !to || !relation.type) continue
+      await this.prisma.storyRelation.upsert({
+        where: {
+          projectId_fromEntityId_toEntityId_type: {
+            projectId,
+            fromEntityId: from.id,
+            toEntityId: to.id,
+            type: relation.type,
+          },
+        },
+        create: {
+          projectId,
+          fromEntityId: from.id,
+          toEntityId: to.id,
+          type: relation.type,
+          description: relation.description,
+        },
+        update: {
+          description: relation.description,
+        },
+      })
+    }
   }
 
   private buildMainlineWritePrompt(contextPack: any, currentContent: string, instruction?: string) {

@@ -5,6 +5,7 @@ import { StorySystemService } from './story-system.service'
 import {
   ContinueStoryAgentRunDto,
   CreateChapterCommitDto,
+  RepairChapterDto,
   StartStoryAgentRunDto,
   WriteChapterDto,
 } from './dto'
@@ -70,6 +71,16 @@ export class StorySystemController {
     return this.storySystemService.writeChapter(user.id, projectId, chapterId, dto)
   }
 
+  @Post('chapters/:chapterId/story-system/repair')
+  repair(
+    @CurrentUser() user: any,
+    @Param('projectId') projectId: string,
+    @Param('chapterId') chapterId: string,
+    @Body() dto: RepairChapterDto,
+  ) {
+    return this.storySystemService.repairChapter(user.id, projectId, chapterId, dto)
+  }
+
   @Post('chapters/:chapterId/story-system/commits')
   createCommit(
     @CurrentUser() user: any,
@@ -87,6 +98,67 @@ export class StorySystemController {
     @Param('chapterId') chapterId: string,
   ) {
     return this.storySystemService.listCommits(user.id, projectId, chapterId)
+  }
+
+  @Get('chapters/:chapterId/story-system/review-reports')
+  listReviewReports(
+    @CurrentUser() user: any,
+    @Param('projectId') projectId: string,
+    @Param('chapterId') chapterId: string,
+  ) {
+    return this.storySystemService.listReviewReports(user.id, projectId, chapterId)
+  }
+
+  @Get('chapters/:chapterId/story-system/repair-plans')
+  listRepairPlans(
+    @CurrentUser() user: any,
+    @Param('projectId') projectId: string,
+    @Param('chapterId') chapterId: string,
+  ) {
+    return this.storySystemService.listRepairPlans(user.id, projectId, chapterId)
+  }
+
+  @Get('story-graph/entities')
+  listGraphEntities(
+    @CurrentUser() user: any,
+    @Param('projectId') projectId: string,
+  ) {
+    return this.storySystemService.listGraphEntities(user.id, projectId)
+  }
+
+  @Get('story-graph/entities/:entityId')
+  getGraphEntity(
+    @CurrentUser() user: any,
+    @Param('projectId') projectId: string,
+    @Param('entityId') entityId: string,
+  ) {
+    return this.storySystemService.getGraphEntity(user.id, projectId, entityId)
+  }
+
+  @Get('story-graph/open-loops')
+  listOpenLoops(
+    @CurrentUser() user: any,
+    @Param('projectId') projectId: string,
+  ) {
+    return this.storySystemService.listOpenLoops(user.id, projectId)
+  }
+
+  @Get('story-graph/path')
+  findGraphPath(
+    @CurrentUser() user: any,
+    @Param('projectId') projectId: string,
+    @Query('from') from: string,
+    @Query('to') to: string,
+  ) {
+    return this.storySystemService.findGraphPath(user.id, projectId, from, to)
+  }
+
+  @Post('story-system/projections/rebuild')
+  rebuildProjections(
+    @CurrentUser() user: any,
+    @Param('projectId') projectId: string,
+  ) {
+    return this.storySystemService.rebuildProjections(user.id, projectId)
   }
 
   @Post('chapters/:chapterId/story-system/agent-runs')

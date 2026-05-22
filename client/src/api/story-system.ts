@@ -66,6 +66,8 @@ export interface ChapterCommit {
   id: string
   status: string
   contentSnapshot: string
+  blockingReasons?: string
+  repairPlanId?: string
   reviewResult: string
   fulfillmentResult: string
   extractionResult: string
@@ -74,12 +76,64 @@ export interface ChapterCommit {
   createdAt: string
 }
 
+export interface ReviewIssue {
+  id: string
+  category: string
+  severity: string
+  blocking: boolean
+  message: string
+  evidence?: string
+  suggestion?: string
+  startOffset?: number
+  endOffset?: number
+}
+
+export interface ReviewReport {
+  id: string
+  status: string
+  summary?: string
+  createdAt: string
+  issues?: ReviewIssue[]
+}
+
+export interface RepairPlan {
+  id: string
+  status: string
+  steps: string
+  targetRanges?: string
+  createdAt: string
+}
+
+export interface OpenLoop {
+  id: string
+  key: string
+  title: string
+  status: string
+  payload?: string
+  updatedAt: string
+}
+
+export interface StoryEntity {
+  id: string
+  name: string
+  type: string
+  aliases?: string
+  payload?: string
+  updatedAt: string
+}
+
 export interface StoryWriteResult {
   blocked: boolean
   completion: string
   runId?: string
   contextPackId?: string
   preflight: StoryPreflightResult
+}
+
+export interface StoryRepairResult {
+  repairedText: string
+  runId: string
+  repairPlanId: string
 }
 
 export const storySystemApi = {
@@ -132,6 +186,18 @@ export const storySystemApi = {
     return response.data
   },
 
+  async repairChapter(projectId: string, chapterId: string, data: {
+    content: string
+    instruction?: string
+    repairPlanId?: string
+  }): Promise<StoryRepairResult> {
+    const response = await apiClient.post(
+      `/projects/${projectId}/chapters/${chapterId}/story-system/repair`,
+      data,
+    )
+    return response.data
+  },
+
   async createCommit(projectId: string, chapterId: string, data: {
     content: string
     runId?: string
@@ -140,6 +206,9 @@ export const storySystemApi = {
       acceptedEvents?: unknown[]
       stateDeltas?: unknown[]
       entityDeltas?: unknown[]
+      openLoops?: unknown[]
+      entities?: unknown[]
+      relations?: unknown[]
       summaryText?: string
     }
   }): Promise<ChapterCommit> {
@@ -147,6 +216,30 @@ export const storySystemApi = {
       `/projects/${projectId}/chapters/${chapterId}/story-system/commits`,
       data,
     )
+    return response.data
+  },
+
+  async listReviewReports(projectId: string, chapterId: string): Promise<ReviewReport[]> {
+    const response = await apiClient.get(
+      `/projects/${projectId}/chapters/${chapterId}/story-system/review-reports`,
+    )
+    return response.data
+  },
+
+  async listRepairPlans(projectId: string, chapterId: string): Promise<RepairPlan[]> {
+    const response = await apiClient.get(
+      `/projects/${projectId}/chapters/${chapterId}/story-system/repair-plans`,
+    )
+    return response.data
+  },
+
+  async listOpenLoops(projectId: string): Promise<OpenLoop[]> {
+    const response = await apiClient.get(`/projects/${projectId}/story-graph/open-loops`)
+    return response.data
+  },
+
+  async listGraphEntities(projectId: string): Promise<StoryEntity[]> {
+    const response = await apiClient.get(`/projects/${projectId}/story-graph/entities`)
     return response.data
   },
 

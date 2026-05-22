@@ -55,6 +55,25 @@ export class DialogueSessionsController {
     return this.dialogueSessionsService.continueSession(user.id, projectId, id, dto)
   }
 
+  @Get(':id/quality-reports')
+  async listQualityReports(
+    @CurrentUser() user: any,
+    @Param('projectId') projectId: string,
+    @Param('id') id: string,
+  ) {
+    return this.dialogueSessionsService.listQualityReports(user.id, projectId, id)
+  }
+
+  @Post(':id/improve')
+  async improveFromQualityReport(
+    @CurrentUser() user: any,
+    @Param('projectId') projectId: string,
+    @Param('id') id: string,
+    @Body() dto: { instruction?: string },
+  ) {
+    return this.dialogueSessionsService.improveFromQualityReport(user.id, projectId, id, dto)
+  }
+
   @Post(':id/pause')
   async pause(
     @CurrentUser() user: any,

@@ -21,6 +21,7 @@ import { WritingStylesModule } from './modules/writing-styles/writing-styles.mod
 import { ConsistencyModule } from './modules/consistency/consistency.module'
 import { DialogueSessionsModule } from './modules/dialogue-sessions/dialogue-sessions.module'
 import { StorySystemModule } from './modules/story-system/story-system.module'
+import { ReaderExperienceModule } from './modules/reader-experience/reader-experience.module'
 
 @Module({
   imports: [
@@ -48,6 +49,7 @@ import { StorySystemModule } from './modules/story-system/story-system.module'
     ConsistencyModule,
     DialogueSessionsModule,
     StorySystemModule,
+    ReaderExperienceModule,
   ],
 })
 export class AppModule {}

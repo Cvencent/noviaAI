@@ -48,6 +48,28 @@ export interface ContinueDialogueSessionDto {
   rounds?: number
 }
 
+export interface DialogueQualityIssue {
+  id: string
+  category: string
+  severity: string
+  message: string
+  speaker?: string
+  evidence?: string
+}
+
+export interface DialogueQualityReport {
+  id: string
+  status: 'PASS' | 'WARN'
+  summary?: string
+  createdAt: string
+  issues: DialogueQualityIssue[]
+}
+
+export interface DialogueCandidate {
+  messages: Array<{ speaker?: string; content?: string }>
+  oocWarnings: string[]
+}
+
 export const dialogueSessionsApi = {
   async getAll(projectId: string, chapterId?: string): Promise<DialogueSession[]> {
     const params = chapterId ? `?chapterId=${encodeURIComponent(chapterId)}` : ''
@@ -67,6 +89,25 @@ export const dialogueSessionsApi = {
   ): Promise<DialogueSession> {
     const response = await apiClient.post(
       `/projects/${projectId}/dialogue-sessions/${sessionId}/continue`,
+      data,
+    )
+    return response.data
+  },
+
+  async getQualityReports(projectId: string, sessionId: string): Promise<DialogueQualityReport[]> {
+    const response = await apiClient.get(
+      `/projects/${projectId}/dialogue-sessions/${sessionId}/quality-reports`,
+    )
+    return response.data
+  },
+
+  async improve(
+    projectId: string,
+    sessionId: string,
+    data: { instruction?: string },
+  ): Promise<DialogueCandidate> {
+    const response = await apiClient.post(
+      `/projects/${projectId}/dialogue-sessions/${sessionId}/improve`,
       data,
     )
     return response.data

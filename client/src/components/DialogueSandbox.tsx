@@ -8,6 +8,8 @@ import { Select } from './ui/Select'
 import { charactersApi, Character } from '../api/characters'
 import {
   CreateDialogueSessionDto,
+  DialogueCandidate,
+  DialogueQualityReport,
   DialogueSession,
   dialogueSessionsApi,
 } from '../api/dialogue-sessions'
@@ -25,7 +27,10 @@ export function DialogueSandbox({ projectId, chapterId, onClose, onInsertText }:
   const [selectedSession, setSelectedSession] = useState<DialogueSession | null>(null)
   const [isCreating, setIsCreating] = useState(false)
   const [isGenerating, setIsGenerating] = useState(false)
+  const [isImproving, setIsImproving] = useState(false)
   const [instruction, setInstruction] = useState('')
+  const [qualityReports, setQualityReports] = useState<DialogueQualityReport[]>([])
+  const [improvedCandidate, setImprovedCandidate] = useState<DialogueCandidate | null>(null)
   const [rounds, setRounds] = useState(2)
   const [formData, setFormData] = useState<CreateDialogueSessionDto>({
     title: '',
@@ -52,7 +57,13 @@ export function DialogueSandbox({ projectId, chapterId, onClose, onInsertText }:
     setCharacters(characterData)
     if (!selectedSession && sessionData.length > 0) {
       setSelectedSession(sessionData[0])
+      void loadQualityReports(sessionData[0].id)
     }
+  }
+
+  const loadQualityReports = async (sessionId: string) => {
+    const reports = await dialogueSessionsApi.getQualityReports(projectId, sessionId).catch(() => [])
+    setQualityReports(reports)
   }
 
   const selectedCharacterNames = useMemo(() => {
@@ -111,6 +122,8 @@ export function DialogueSandbox({ projectId, chapterId, onClose, onInsertText }:
       })
       replaceSession(updated)
       setSelectedSession(updated)
+      await loadQualityReports(updated.id)
+      setImprovedCandidate(null)
       setInstruction('')
     } catch (error) {
       console.error('继续对话失败:', error)
@@ -127,6 +140,22 @@ export function DialogueSandbox({ projectId, chapterId, onClose, onInsertText }:
       : await dialogueSessionsApi.resume(projectId, selectedSession.id)
     replaceSession(updated)
     setSelectedSession(updated)
+  }
+
+  const improveFromReport = async () => {
+    if (!selectedSession) return
+    setIsImproving(true)
+    try {
+      const candidate = await dialogueSessionsApi.improve(projectId, selectedSession.id, {
+        instruction: instruction.trim() || undefined,
+      })
+      setImprovedCandidate(candidate)
+    } catch (error) {
+      console.error('生成改写候选失败:', error)
+      alert('生成改写候选失败，请检查 AI 设置或稍后重试')
+    } finally {
+      setIsImproving(false)
+    }
   }
 
   const deleteSession = async () => {
@@ -262,7 +291,11 @@ export function DialogueSandbox({ projectId, chapterId, onClose, onInsertText }:
             {sessions.map((session) => (
               <button
                 key={session.id}
-                onClick={() => setSelectedSession(session)}
+                onClick={() => {
+                  setSelectedSession(session)
+                  setImprovedCandidate(null)
+                  void loadQualityReports(session.id)
+                }}
                 className={`w-full text-left p-3 rounded-lg border transition-colors ${
                   selectedSession?.id === session.id ? 'border-indigo-500 bg-indigo-50' : 'border-gray-200 bg-white hover:bg-gray-50'
                 }`}
@@ -321,6 +354,40 @@ export function DialogueSandbox({ projectId, chapterId, onClose, onInsertText }:
                   {warnings.map((warning, index) => (
                     <p key={index} className="text-xs text-yellow-800">{warning}</p>
                   ))}
+                </div>
+              )}
+
+              {qualityReports.length > 0 && (
+                <div className="px-3 py-2 border-t border-gray-200 bg-white space-y-2">
+                  <div className="flex items-center justify-between">
+                    <div className="text-xs font-medium text-gray-700">
+                      质量报告 · {qualityReports[0].status}
+                    </div>
+                    <Button variant="outline" size="sm" onClick={improveFromReport} isLoading={isImproving}>
+                      按报告改写
+                    </Button>
+                  </div>
+                  {qualityReports[0].summary && (
+                    <p className="text-xs text-gray-500">{qualityReports[0].summary}</p>
+                  )}
+                  {(qualityReports[0].issues || []).slice(0, 4).map((issue) => (
+                    <div key={issue.id} className="text-xs text-yellow-800">
+                      [{issue.category}/{issue.severity}] {issue.message}
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              {improvedCandidate && (
+                <div className="px-3 py-2 border-t border-indigo-100 bg-indigo-50">
+                  <div className="text-xs font-medium text-indigo-900 mb-2">改写候选</div>
+                  <div className="space-y-1">
+                    {improvedCandidate.messages.map((message, index) => (
+                      <div key={index} className="text-xs text-indigo-950">
+                        {message.speaker || '旁白'}：{message.content || ''}
+                      </div>
+                    ))}
+                  </div>
                 </div>
               )}
 

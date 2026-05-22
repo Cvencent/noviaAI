@@ -14,8 +14,12 @@ import { Button } from './ui/Button'
 import { Textarea } from './ui/Textarea'
 import {
   ChapterCommit,
+  OpenLoop,
+  RepairPlan,
+  ReviewReport,
   StoryAgentRun,
   StoryContextPack,
+  StoryEntity,
   StoryPreflightResult,
   StoryRuntimeHealth,
   storySystemApi,
@@ -56,8 +60,13 @@ export function StorySystemPanel({ projectId, chapterId, content, onClose }: Sto
   const [preflight, setPreflight] = useState<StoryPreflightResult | null>(null)
   const [contextPack, setContextPack] = useState<StoryContextPack | null>(null)
   const [commits, setCommits] = useState<ChapterCommit[]>([])
+  const [reviewReports, setReviewReports] = useState<ReviewReport[]>([])
+  const [repairPlans, setRepairPlans] = useState<RepairPlan[]>([])
+  const [openLoops, setOpenLoops] = useState<OpenLoop[]>([])
+  const [graphEntities, setGraphEntities] = useState<StoryEntity[]>([])
   const [run, setRun] = useState<StoryAgentRun | null>(null)
   const [instruction, setInstruction] = useState('')
+  const [repairPreview, setRepairPreview] = useState('')
   const [isBusy, setIsBusy] = useState(false)
   const [message, setMessage] = useState('')
 
@@ -73,12 +82,20 @@ export function StorySystemPanel({ projectId, chapterId, content, onClose }: Sto
   }, [projectId, chapterId])
 
   const loadStatus = async () => {
-    const [healthData, commitData] = await Promise.all([
+    const [healthData, commitData, reportData, repairData, loopData, entityData] = await Promise.all([
       storySystemApi.health(projectId, chapterId).catch(() => null),
       storySystemApi.listCommits(projectId, chapterId).catch(() => []),
+      storySystemApi.listReviewReports(projectId, chapterId).catch(() => []),
+      storySystemApi.listRepairPlans(projectId, chapterId).catch(() => []),
+      storySystemApi.listOpenLoops(projectId).catch(() => []),
+      storySystemApi.listGraphEntities(projectId).catch(() => []),
     ])
     setHealth(healthData)
     setCommits(commitData)
+    setReviewReports(reportData)
+    setRepairPlans(repairData)
+    setOpenLoops(loopData)
+    setGraphEntities(entityData)
   }
 
   const runAction = async (label: string, action: () => Promise<void>) => {
@@ -157,6 +174,17 @@ export function StorySystemPanel({ projectId, chapterId, content, onClose }: Sto
       },
     })
     setCommits(await storySystemApi.listCommits(projectId, chapterId))
+    await loadStatus()
+  })
+
+  const repairCurrent = (repairPlanId: string) => runAction('修复候选', async () => {
+    const result = await storySystemApi.repairChapter(projectId, chapterId, {
+      content,
+      repairPlanId,
+      instruction: instruction.trim() || undefined,
+    })
+    setRepairPreview(result.repairedText)
+    await loadStatus()
   })
 
   return (
@@ -303,6 +331,88 @@ export function StorySystemPanel({ projectId, chapterId, content, onClose }: Sto
           )}
         </section>
 
+        {(repairPlans.length > 0 || reviewReports.length > 0) && (
+          <section className="space-y-2">
+            <div className="text-sm font-medium text-gray-900">审查与修复</div>
+            {repairPlans.slice(0, 3).map((plan) => {
+              const steps = parseJson(plan.steps) || []
+              return (
+                <details key={plan.id} className="rounded-lg border border-red-100 bg-red-50 p-3">
+                  <summary className="cursor-pointer text-sm font-medium text-red-800">
+                    修复计划 · {statusLabel(plan.status)}
+                  </summary>
+                  <div className="mt-2 space-y-2">
+                    {steps.map((step: any, index: number) => (
+                      <div key={index} className="text-xs text-red-900">
+                        {step.order || index + 1}. {step.action || step.issue}
+                      </div>
+                    ))}
+                    {steps.length === 0 && <div className="text-xs text-red-700">暂无结构化修复步骤</div>}
+                    <Button variant="outline" size="sm" onClick={() => repairCurrent(plan.id)} isLoading={isBusy}>
+                      生成修复候选
+                    </Button>
+                  </div>
+                </details>
+              )
+            })}
+            {repairPreview && (
+              <details className="rounded-lg border border-indigo-100 bg-indigo-50 p-3" open>
+                <summary className="cursor-pointer text-sm font-medium text-indigo-900">修复候选文本</summary>
+                <div className="mt-2 whitespace-pre-wrap text-xs text-indigo-950">{repairPreview}</div>
+              </details>
+            )}
+            {reviewReports.slice(0, 2).map((report) => (
+              <details key={report.id} className="rounded-lg border border-gray-200 p-3">
+                <summary className="cursor-pointer text-sm font-medium text-gray-800">
+                  ReviewReport · {statusLabel(report.status)}
+                </summary>
+                <div className="mt-2 space-y-2">
+                  {report.summary && <div className="text-xs text-gray-600">{report.summary}</div>}
+                  {(report.issues || []).map((issue) => (
+                    <div key={issue.id} className={issue.blocking ? 'text-xs text-red-700' : 'text-xs text-gray-600'}>
+                      [{issue.category}/{issue.severity}] {issue.message}
+                      {issue.suggestion && <div className="mt-1 text-gray-500">建议：{issue.suggestion}</div>}
+                    </div>
+                  ))}
+                </div>
+              </details>
+            ))}
+          </section>
+        )}
+
+        {(openLoops.length > 0 || graphEntities.length > 0) && (
+          <section className="space-y-2">
+            <div className="text-sm font-medium text-gray-900">投影记忆</div>
+            {openLoops.length > 0 && (
+              <div className="rounded-lg border border-gray-200 p-3">
+                <div className="text-xs font-medium text-gray-700 mb-2">开放伏笔</div>
+                <div className="space-y-1">
+                  {openLoops.slice(0, 6).map((loop) => (
+                    <div key={loop.id} className="flex items-center justify-between gap-2 text-xs">
+                      <span className="text-gray-700 truncate">{loop.title}</span>
+                      <span className={loop.status === 'OPEN' ? 'text-yellow-700' : 'text-green-700'}>
+                        {loop.status}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+            {graphEntities.length > 0 && (
+              <div className="rounded-lg border border-gray-200 p-3">
+                <div className="text-xs font-medium text-gray-700 mb-2">图谱实体</div>
+                <div className="flex flex-wrap gap-2">
+                  {graphEntities.slice(0, 12).map((entity) => (
+                    <span key={entity.id} className="rounded-full bg-gray-100 px-2 py-1 text-xs text-gray-700">
+                      {entity.name} · {entity.type}
+                    </span>
+                  ))}
+                </div>
+              </div>
+            )}
+          </section>
+        )}
+
         <section className="space-y-2">
           <div className="flex items-center justify-between">
             <div className="text-sm font-medium text-gray-900">ChapterCommit</div>
@@ -315,6 +425,7 @@ export function StorySystemPanel({ projectId, chapterId, content, onClose }: Sto
             {commits.map((commit) => {
               const fulfillment = parseJson(commit.fulfillmentResult)
               const projection = parseJson(commit.projectionStatus)
+              const blockingReasons = parseJson(commit.blockingReasons) || []
               return (
                 <div key={commit.id} className="rounded-lg border border-gray-200 p-3 text-xs">
                   <div className="flex items-center justify-between">
@@ -326,6 +437,18 @@ export function StorySystemPanel({ projectId, chapterId, content, onClose }: Sto
                   {commit.summaryText && <div className="mt-2 text-gray-700">{commit.summaryText}</div>}
                   {fulfillment?.missedNodes?.length > 0 && (
                     <div className="mt-2 text-red-700">漏掉节点：{fulfillment.missedNodes.join('；')}</div>
+                  )}
+                  {blockingReasons.length > 0 && (
+                    <div className="mt-2 space-y-1">
+                      {blockingReasons.map((reason: string, index: number) => (
+                        <div key={index} className="text-red-700">阻断：{reason}</div>
+                      ))}
+                    </div>
+                  )}
+                  {commit.status === 'REJECTED' && commit.repairPlanId && (
+                    <div className="mt-2 rounded bg-red-50 px-2 py-1 text-red-700">
+                      已生成修复计划：{commit.repairPlanId.slice(0, 8)}
+                    </div>
                   )}
                   {projection && (
                     <div className="mt-2 text-gray-500">投影：{Object.entries(projection).map(([key, value]) => `${key}:${value}`).join(' · ')}</div>

@@ -65,14 +65,22 @@ model Project {
   turningPoints           TurningPoint[]
   timelineEvents          TimelineEvent[]
   dialogueSessions        DialogueSession[]
+  dialogueQualityReports  DialogueQualityReport[]
   storyContracts          StoryContract[]
   storyContextPacks       StoryContextPack[]
   storyAgentRuns          StoryAgentRun[]
   chapterCommits          ChapterCommit[]
-  
+  reviewReports           ReviewReport[]
+  repairPlans             RepairPlan[]
+  storyEvents             StoryEvent[]
+  characterStates         CharacterState[]
+  openLoops               OpenLoop[]
+  storyEntities           StoryEntity[]
+  storyRelations          StoryRelation[]
+
   // 写作风格配置
-  currentWritingStyleId   String?
-  writingStyleConfig      String?
+  currentWritingStyleId String?
+  writingStyleConfig    String?
 }
 
 model WorldSetting {
@@ -134,18 +142,18 @@ model CharacterRelationship {
 }
 
 model Scene {
-  id          String   @id @default(uuid())
-  projectId   String
-  title       String
-  summary     String?
-  location    String?
-  timePeriod  String?
-  characters  String
-  content     String?
-  order       Int?
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
-  project     Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  id         String   @id @default(uuid())
+  projectId  String
+  title      String
+  summary    String?
+  location   String?
+  timePeriod String?
+  characters String
+  content    String?
+  order      Int?
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+  project    Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
 }
 
 model Plot {
@@ -173,25 +181,30 @@ model PlotPoint {
 }
 
 model Chapter {
-  id        String           @id @default(uuid())
-  projectId String
-  title     String
-  order     Int
-  status    String           @default("DRAFT")
-  wordCount Int              @default(0)
-  summary   String?
-  createdAt DateTime         @default(now())
-  updatedAt DateTime         @updatedAt
-  project   Project          @relation(fields: [projectId], references: [id], onDelete: Cascade)
-  contents  ChapterContent[]
-  summaries ChapterSummary[]
-  loreUsages LoreUsage[]
-  setupGuns  ChekhovsGun[]  @relation("SetupChapter")
-  payoffGuns ChekhovsGun[]  @relation("PayoffChapter")
-  storyContracts StoryContract[]
+  id                String             @id @default(uuid())
+  projectId         String
+  title             String
+  order             Int
+  status            String             @default("DRAFT")
+  wordCount         Int                @default(0)
+  summary           String?
+  createdAt         DateTime           @default(now())
+  updatedAt         DateTime           @updatedAt
+  project           Project            @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  contents          ChapterContent[]
+  summaries         ChapterSummary[]
+  loreUsages        LoreUsage[]
+  setupGuns         ChekhovsGun[]      @relation("SetupChapter")
+  payoffGuns        ChekhovsGun[]      @relation("PayoffChapter")
+  storyContracts    StoryContract[]
   storyContextPacks StoryContextPack[]
-  storyAgentRuns StoryAgentRun[]
-  chapterCommits ChapterCommit[]
+  storyAgentRuns    StoryAgentRun[]
+  chapterCommits    ChapterCommit[]
+  reviewReports     ReviewReport[]
+  repairPlans       RepairPlan[]
+  storyEvents       StoryEvent[]
+  characterStates   CharacterState[]
+  entityMentions    EntityMention[]
 }
 
 model ChapterContent {
@@ -229,34 +242,34 @@ model ConsistencyCheckRule {
 }
 
 model ConsistencyCheckReport {
-  id            String   @id @default(uuid())
+  id            String    @id @default(uuid())
   projectId     String
   chapterId     String?
   content       String
   reportData    String
-  totalIssues   Int      @default(0)
-  criticalCount Int      @default(0)
-  normalCount   Int      @default(0)
-  minorCount    Int      @default(0)
-  isReviewed    Boolean  @default(false)
+  totalIssues   Int       @default(0)
+  criticalCount Int       @default(0)
+  normalCount   Int       @default(0)
+  minorCount    Int       @default(0)
+  isReviewed    Boolean   @default(false)
   reviewedAt    DateTime?
-  createdAt     DateTime @default(now())
-  updatedAt     DateTime @updatedAt
-  project       Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+  project       Project   @relation(fields: [projectId], references: [id], onDelete: Cascade)
 
   @@index([projectId])
   @@index([chapterId])
 }
 
 model CharacterAppearance {
-  id          String   @id @default(uuid())
+  id          String    @id @default(uuid())
   characterId String
   chapterId   String?
   description String
   details     String?
   context     String?
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
   character   Character @relation(fields: [characterId], references: [id], onDelete: Cascade)
 
   @@index([characterId])
@@ -269,7 +282,7 @@ model ApiKey {
   provider     String
   name         String
   encryptedKey String
-  baseUrl      String?    // 自定义 API 端点地址
+  baseUrl      String? // 自定义 API 端点地址
   isActive     Boolean    @default(true)
   expiresAt    DateTime?
   createdAt    DateTime   @default(now())
@@ -296,7 +309,7 @@ model UsageLog {
 }
 
 model CustomWritingStyle {
-  id          String   @id @default(uuid())
+  id          String                @id @default(uuid())
   userId      String
   name        String
   description String?
@@ -304,41 +317,41 @@ model CustomWritingStyle {
   config      String
   sourceType  String
   sourceData  String?
-  isPublic    Boolean  @default(false)
-  useCount    Int      @default(0)
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
-  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  isPublic    Boolean               @default(false)
+  useCount    Int                   @default(0)
+  createdAt   DateTime              @default(now())
+  updatedAt   DateTime              @updatedAt
+  user        User                  @relation(fields: [userId], references: [id], onDelete: Cascade)
   history     WritingStyleHistory[]
 
   @@index([userId])
 }
 
 model WritingStyleFusion {
-  id          String   @id @default(uuid())
-  userId      String
-  name        String
-  description String?
-  styles      String
-  resultConfig String
+  id                    String   @id @default(uuid())
+  userId                String
+  name                  String
+  description           String?
+  styles                String
+  resultConfig          String
   compatibilityAnalysis String?
-  createdAt   DateTime @default(now())
-  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  createdAt             DateTime @default(now())
+  user                  User     @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@index([userId])
 }
 
 model WritingStyleHistory {
-  id          String   @id @default(uuid())
-  userId      String
-  projectId   String?
-  styleId     String?
-  action      String
-  details     String?
-  createdAt   DateTime @default(now())
-  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-  project     Project? @relation(fields: [projectId], references: [id], onDelete: Cascade)
-  style       CustomWritingStyle? @relation(fields: [styleId], references: [id], onDelete: Cascade)
+  id        String              @id @default(uuid())
+  userId    String
+  projectId String?
+  styleId   String?
+  action    String
+  details   String?
+  createdAt DateTime            @default(now())
+  user      User                @relation(fields: [userId], references: [id], onDelete: Cascade)
+  project   Project?            @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  style     CustomWritingStyle? @relation(fields: [styleId], references: [id], onDelete: Cascade)
 
   @@index([userId])
   @@index([projectId])
@@ -347,72 +360,72 @@ model WritingStyleHistory {
 
 // ==================== Lorebook/设定簿系统 ====================
 model LoreEntry {
-  id          String        @id @default(uuid())
+  id          String  @id @default(uuid())
   projectId   String
   name        String
-  category    String        // CHARACTER, LOCATION, ITEM, MAGIC, RACE, ORGANIZATION, OTHER
+  category    String // CHARACTER, LOCATION, ITEM, MAGIC, RACE, ORGANIZATION, OTHER
   description String
-  content     String?       // 详细内容，可以是Markdown
-  keywords    String        // 逗号分隔的触发关键词
-  priority    Int           @default(50) // 优先级，越高越先匹配
-  isActive    Boolean       @default(true)
-  order       Int           @default(0)
-  
+  content     String? // 详细内容，可以是Markdown
+  keywords    String // 逗号分隔的触发关键词
+  priority    Int     @default(50) // 优先级，越高越先匹配
+  isActive    Boolean @default(true)
+  order       Int     @default(0)
+
   // 条件触发
-  triggerCondition String? // 触发条件（可选）
+  triggerCondition    String? // 触发条件（可选）
   relatedCharacterIds String? // 关联角色ID（逗号分隔）
-  relatedLocationIds String? // 关联地点ID（逗号分隔）
-  
-  createdAt   DateTime      @default(now())
-  updatedAt   DateTime      @updatedAt
-  project     Project       @relation(fields: [projectId], references: [id], onDelete: Cascade)
-  usages      LoreUsage[]
-  
+  relatedLocationIds  String? // 关联地点ID（逗号分隔）
+
+  createdAt DateTime    @default(now())
+  updatedAt DateTime    @updatedAt
+  project   Project     @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  usages    LoreUsage[]
+
   @@index([projectId])
   @@index([projectId, category])
   @@index([projectId, isActive])
 }
 
 model LoreUsage {
-  id          String      @id @default(uuid())
+  id          String    @id @default(uuid())
   loreEntryId String
   chapterId   String?
   content     String
   context     String?
-  createdAt   DateTime    @default(now())
-  loreEntry   LoreEntry   @relation(fields: [loreEntryId], references: [id], onDelete: Cascade)
-  chapter     Chapter?    @relation(fields: [chapterId], references: [id], onDelete: Cascade)
-  
+  createdAt   DateTime  @default(now())
+  loreEntry   LoreEntry @relation(fields: [loreEntryId], references: [id], onDelete: Cascade)
+  chapter     Chapter?  @relation(fields: [chapterId], references: [id], onDelete: Cascade)
+
   @@index([loreEntryId])
   @@index([chapterId])
 }
 
 // ==================== 伏笔/Chekhov's Gun系统 ====================
 model ChekhovsGun {
-  id          String        @id @default(uuid())
-  projectId   String
-  name        String
-  description String
-  setupText   String        // 埋设伏笔的原文
-  setupChapterId String?    // 埋设伏笔的章节
-  setupPosition Int?        // 在章节中的位置
-  
+  id             String  @id @default(uuid())
+  projectId      String
+  name           String
+  description    String
+  setupText      String // 埋设伏笔的原文
+  setupChapterId String? // 埋设伏笔的章节
+  setupPosition  Int? // 在章节中的位置
+
   // 状态
-  status      String        @default("SETUP") // SETUP, REMINDER, PAYOFF, ABANDONED
-  payoffText  String?       // 回收伏笔的原文
-  payoffChapterId String?   // 回收伏笔的章节
-  
+  status          String  @default("SETUP") // SETUP, REMINDER, PAYOFF, ABANDONED
+  payoffText      String? // 回收伏笔的原文
+  payoffChapterId String? // 回收伏笔的章节
+
   // 元数据
-  importance  String        @default("NORMAL") // MINOR, NORMAL, MAJOR, CRITICAL
-  tags        String?       // 逗号分隔的标签
-  notes       String?       // 作者备注
-  
-  createdAt   DateTime      @default(now())
-  updatedAt   DateTime      @updatedAt
-  project     Project       @relation(fields: [projectId], references: [id], onDelete: Cascade)
-  setupChapter Chapter?     @relation("SetupChapter", fields: [setupChapterId], references: [id], onDelete: Cascade)
-  payoffChapter Chapter?    @relation("PayoffChapter", fields: [payoffChapterId], references: [id], onDelete: Cascade)
-  
+  importance String  @default("NORMAL") // MINOR, NORMAL, MAJOR, CRITICAL
+  tags       String? // 逗号分隔的标签
+  notes      String? // 作者备注
+
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+  project       Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  setupChapter  Chapter? @relation("SetupChapter", fields: [setupChapterId], references: [id], onDelete: Cascade)
+  payoffChapter Chapter? @relation("PayoffChapter", fields: [payoffChapterId], references: [id], onDelete: Cascade)
+
   @@index([projectId])
   @@index([projectId, status])
   @@index([setupChapterId])
@@ -426,7 +439,7 @@ model Outline {
   title         String
   description   String?
   structureType String        @default("FULL_BOOK") // FULL_BOOK, VOLUME, ARC
-  status        String        @default("DRAFT")      // DRAFT, IN_PROGRESS, COMPLETED
+  status        String        @default("DRAFT") // DRAFT, IN_PROGRESS, COMPLETED
   order         Int           @default(0)
   createdAt     DateTime      @default(now())
   updatedAt     DateTime      @updatedAt
@@ -437,24 +450,24 @@ model Outline {
 }
 
 model OutlineItem {
-  id            String       @id @default(uuid())
-  outlineId     String
-  chapterId     String?
-  parentId      String?
-  title         String
-  summary       String?
-  goal          String?
-  conflict      String?
-  outcome       String?
-  povCharacter  String?
-  location      String?
+  id             String        @id @default(uuid())
+  outlineId      String
+  chapterId      String?
+  parentId       String?
+  title          String
+  summary        String?
+  goal           String?
+  conflict       String?
+  outcome        String?
+  povCharacter   String?
+  location       String?
   estimatedWords Int?
-  order         Int          @default(0)
-  createdAt     DateTime     @default(now())
-  updatedAt     DateTime     @updatedAt
-  outline       Outline      @relation(fields: [outlineId], references: [id], onDelete: Cascade)
-  parent        OutlineItem? @relation("OutlineItemTree", fields: [parentId], references: [id], onDelete: Cascade)
-  children      OutlineItem[] @relation("OutlineItemTree")
+  order          Int           @default(0)
+  createdAt      DateTime      @default(now())
+  updatedAt      DateTime      @updatedAt
+  outline        Outline       @relation(fields: [outlineId], references: [id], onDelete: Cascade)
+  parent         OutlineItem?  @relation("OutlineItemTree", fields: [parentId], references: [id], onDelete: Cascade)
+  children       OutlineItem[] @relation("OutlineItemTree")
 
   @@index([outlineId])
   @@index([parentId])
@@ -463,19 +476,19 @@ model OutlineItem {
 
 // ==================== 转折点系统 ====================
 model TurningPoint {
-  id              String   @id @default(uuid())
-  projectId       String
-  chapterId       String?
-  title           String
-  type            String   @default("PLOT_TURN") // PLOT_TURN, CHARACTER_REVEAL, REVERSAL, CRISIS, CLIMAX, RESOLUTION
-  description     String?
-  impact          String?
-  emotionalShift  String?
-  position        String?  // 故事中的位置描述
-  order           Int      @default(0)
-  createdAt       DateTime @default(now())
-  updatedAt       DateTime @updatedAt
-  project         Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  id             String   @id @default(uuid())
+  projectId      String
+  chapterId      String?
+  title          String
+  type           String   @default("PLOT_TURN") // PLOT_TURN, CHARACTER_REVEAL, REVERSAL, CRISIS, CLIMAX, RESOLUTION
+  description    String?
+  impact         String?
+  emotionalShift String?
+  position       String? // 故事中的位置描述
+  order          Int      @default(0)
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+  project        Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
 
   @@index([projectId])
   @@index([chapterId])
@@ -487,11 +500,11 @@ model TimelineEvent {
   projectId   String
   chapterId   String?
   title       String
-  eventDate   String?  // 故事内日期（可以是模糊的）
-  timeLabel   String?  // 时间标签，如"黎明"、"三天后"
+  eventDate   String? // 故事内日期（可以是模糊的）
+  timeLabel   String? // 时间标签，如"黎明"、"三天后"
   description String?
   location    String?
-  characters  String?  // 关联角色（逗号分隔）
+  characters  String? // 关联角色（逗号分隔）
   importance  String   @default("NORMAL") // MINOR, NORMAL, MAJOR, CRITICAL
   order       Int      @default(0)
   createdAt   DateTime @default(now())
@@ -504,7 +517,7 @@ model TimelineEvent {
 
 // ==================== 角色对话沙盒 ====================
 model DialogueSession {
-  id                String            @id @default(uuid())
+  id                String                  @id @default(uuid())
   projectId         String
   chapterId         String?
   title             String
@@ -512,16 +525,17 @@ model DialogueSession {
   conflict          String
   goal              String
   mood              String?
-  allowSecretReveal Boolean           @default(false)
-  length            String            @default("medium") // short, medium, long
-  status            String            @default("ACTIVE") // ACTIVE, PAUSED, COMPLETED
+  allowSecretReveal Boolean                 @default(false)
+  length            String                  @default("medium") // short, medium, long
+  status            String                  @default("ACTIVE") // ACTIVE, PAUSED, COMPLETED
   characterIds      String
-  currentTurn       Int               @default(0)
+  currentTurn       Int                     @default(0)
   lastInstruction   String?
-  createdAt         DateTime          @default(now())
-  updatedAt         DateTime          @updatedAt
-  project           Project           @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  createdAt         DateTime                @default(now())
+  updatedAt         DateTime                @updatedAt
+  project           Project                 @relation(fields: [projectId], references: [id], onDelete: Cascade)
   messages          DialogueMessage[]
+  qualityReports    DialogueQualityReport[]
 
   @@index([projectId])
   @@index([chapterId])
@@ -543,12 +557,44 @@ model DialogueMessage {
   @@index([order])
 }
 
+model DialogueQualityReport {
+  id        String                 @id @default(uuid())
+  projectId String
+  sessionId String
+  status    String                 @default("PASS") // PASS, WARN
+  summary   String?
+  createdAt DateTime               @default(now())
+  project   Project                @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  session   DialogueSession        @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  issues    DialogueQualityIssue[]
+
+  @@index([projectId])
+  @@index([sessionId])
+  @@index([status])
+}
+
+model DialogueQualityIssue {
+  id        String                @id @default(uuid())
+  reportId  String
+  category  String // OOC, VOICE_SIMILARITY, SECRET_LEAK, LOW_CONFLICT, FORMAT
+  severity  String                @default("NORMAL") // CRITICAL, NORMAL, MINOR
+  message   String
+  speaker   String?
+  evidence  String?
+  createdAt DateTime              @default(now())
+  report    DialogueQualityReport @relation(fields: [reportId], references: [id], onDelete: Cascade)
+
+  @@index([reportId])
+  @@index([category])
+  @@index([severity])
+}
+
 // ==================== Story System 合同/Agent/提交链 ====================
 model StoryContract {
   id          String   @id @default(uuid())
   projectId   String
   chapterId   String?
-  type        String   // MASTER_SETTING, VOLUME_BRIEF, CHAPTER_BRIEF, REVIEW_CONTRACT
+  type        String // MASTER_SETTING, VOLUME_BRIEF, CHAPTER_BRIEF, REVIEW_CONTRACT
   version     String   @default("story-system/v1")
   status      String   @default("ACTIVE") // ACTIVE, SUPERSEDED
   payload     String
@@ -606,7 +652,7 @@ model StoryAgentRun {
 model StoryAgentStep {
   id        String        @id @default(uuid())
   runId     String
-  stepType  String        // CONTEXT, DRAFT, REVIEW, EXTRACT, COMMIT
+  stepType  String // CONTEXT, DRAFT, REVIEW, EXTRACT, COMMIT
   status    String        @default("PENDING") // PENDING, RUNNING, COMPLETED, FAILED
   input     String?
   output    String?
@@ -622,27 +668,213 @@ model StoryAgentStep {
 }
 
 model ChapterCommit {
-  id                String         @id @default(uuid())
-  projectId          String
-  chapterId          String
-  runId              String?
-  status             String         @default("PENDING") // ACCEPTED, REJECTED, PENDING
-  contentSnapshot    String
-  reviewResult       String
-  fulfillmentResult  String
-  extractionResult   String
-  acceptedEvents     String?
-  stateDeltas        String?
-  entityDeltas       String?
-  summaryText        String?
-  projectionStatus   String
-  createdAt          DateTime       @default(now())
-  project            Project        @relation(fields: [projectId], references: [id], onDelete: Cascade)
-  chapter            Chapter        @relation(fields: [chapterId], references: [id], onDelete: Cascade)
-  agentRun           StoryAgentRun? @relation(fields: [runId], references: [id], onDelete: SetNull)
+  id                String           @id @default(uuid())
+  projectId         String
+  chapterId         String
+  runId             String?
+  repairPlanId      String?
+  status            String           @default("PENDING") // ACCEPTED, REJECTED, PENDING
+  contentSnapshot   String
+  blockingReasons   String?
+  reviewResult      String
+  fulfillmentResult String
+  extractionResult  String
+  acceptedEvents    String?
+  stateDeltas       String?
+  entityDeltas      String?
+  summaryText       String?
+  projectionStatus  String
+  createdAt         DateTime         @default(now())
+  project           Project          @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  chapter           Chapter          @relation(fields: [chapterId], references: [id], onDelete: Cascade)
+  agentRun          StoryAgentRun?   @relation(fields: [runId], references: [id], onDelete: SetNull)
+  reviewReports     ReviewReport[]
+  repairPlan        RepairPlan?
+  storyEvents       StoryEvent[]
+  characterStates   CharacterState[]
+  openLoops         OpenLoop[]
+  entityMentions    EntityMention[]
 
   @@index([projectId])
   @@index([chapterId])
   @@index([runId])
+  @@index([repairPlanId])
   @@index([status])
+}
+
+model ReviewReport {
+  id          String         @id @default(uuid())
+  projectId   String
+  chapterId   String
+  commitId    String?
+  status      String         @default("PASS") // PASS, BLOCKED
+  summary     String?
+  createdAt   DateTime       @default(now())
+  project     Project        @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  chapter     Chapter        @relation(fields: [chapterId], references: [id], onDelete: Cascade)
+  commit      ChapterCommit? @relation(fields: [commitId], references: [id], onDelete: Cascade)
+  issues      ReviewIssue[]
+  repairPlans RepairPlan[]
+
+  @@index([projectId])
+  @@index([chapterId])
+  @@index([commitId])
+  @@index([status])
+}
+
+model ReviewIssue {
+  id          String       @id @default(uuid())
+  reportId    String
+  category    String // FULFILLMENT, CONTINUITY, CHARACTER, WORLD, PACING, READER_PULL, STYLE
+  severity    String       @default("NORMAL") // CRITICAL, NORMAL, MINOR
+  blocking    Boolean      @default(false)
+  message     String
+  evidence    String?
+  suggestion  String?
+  startOffset Int?
+  endOffset   Int?
+  createdAt   DateTime     @default(now())
+  report      ReviewReport @relation(fields: [reportId], references: [id], onDelete: Cascade)
+
+  @@index([reportId])
+  @@index([category])
+  @@index([blocking])
+}
+
+model RepairPlan {
+  id           String         @id @default(uuid())
+  projectId    String
+  chapterId    String
+  commitId     String?        @unique
+  reportId     String?
+  status       String         @default("OPEN") // OPEN, APPLIED, DISMISSED
+  steps        String
+  targetRanges String?
+  createdAt    DateTime       @default(now())
+  updatedAt    DateTime       @updatedAt
+  project      Project        @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  chapter      Chapter        @relation(fields: [chapterId], references: [id], onDelete: Cascade)
+  commit       ChapterCommit? @relation(fields: [commitId], references: [id], onDelete: Cascade)
+  report       ReviewReport?  @relation(fields: [reportId], references: [id], onDelete: SetNull)
+
+  @@index([projectId])
+  @@index([chapterId])
+  @@index([reportId])
+  @@index([status])
+}
+
+model StoryEvent {
+  id        String        @id @default(uuid())
+  projectId String
+  chapterId String
+  commitId  String
+  eventType String
+  subject   String
+  payload   String?
+  createdAt DateTime      @default(now())
+  project   Project       @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  chapter   Chapter       @relation(fields: [chapterId], references: [id], onDelete: Cascade)
+  commit    ChapterCommit @relation(fields: [commitId], references: [id], onDelete: Cascade)
+
+  @@index([projectId])
+  @@index([chapterId])
+  @@index([commitId])
+  @@index([eventType])
+}
+
+model CharacterState {
+  id            String        @id @default(uuid())
+  projectId     String
+  chapterId     String
+  commitId      String
+  characterName String
+  field         String
+  value         String
+  createdAt     DateTime      @default(now())
+  project       Project       @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  chapter       Chapter       @relation(fields: [chapterId], references: [id], onDelete: Cascade)
+  commit        ChapterCommit @relation(fields: [commitId], references: [id], onDelete: Cascade)
+
+  @@index([projectId])
+  @@index([chapterId])
+  @@index([commitId])
+  @@index([characterName])
+}
+
+model OpenLoop {
+  id        String         @id @default(uuid())
+  projectId String
+  chapterId String?
+  commitId  String?
+  key       String
+  title     String
+  status    String         @default("OPEN") // OPEN, RESOLVED
+  payload   String?
+  createdAt DateTime       @default(now())
+  updatedAt DateTime       @updatedAt
+  project   Project        @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  commit    ChapterCommit? @relation(fields: [commitId], references: [id], onDelete: SetNull)
+
+  @@unique([projectId, key])
+  @@index([projectId])
+  @@index([chapterId])
+  @@index([commitId])
+  @@index([status])
+}
+
+model StoryEntity {
+  id            String          @id @default(uuid())
+  projectId     String
+  name          String
+  type          String          @default("CONCEPT") // CHARACTER, LOCATION, ITEM, ORGANIZATION, CONCEPT, EVENT
+  aliases       String?
+  payload       String?
+  createdAt     DateTime        @default(now())
+  updatedAt     DateTime        @updatedAt
+  project       Project         @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  mentions      EntityMention[]
+  relationsFrom StoryRelation[] @relation("StoryRelationFrom")
+  relationsTo   StoryRelation[] @relation("StoryRelationTo")
+
+  @@unique([projectId, name])
+  @@index([projectId])
+  @@index([type])
+}
+
+model EntityMention {
+  id        String         @id @default(uuid())
+  projectId String
+  entityId  String
+  chapterId String?
+  commitId  String?
+  excerpt   String?
+  createdAt DateTime       @default(now())
+  entity    StoryEntity    @relation(fields: [entityId], references: [id], onDelete: Cascade)
+  chapter   Chapter?       @relation(fields: [chapterId], references: [id], onDelete: SetNull)
+  commit    ChapterCommit? @relation(fields: [commitId], references: [id], onDelete: SetNull)
+
+  @@index([projectId])
+  @@index([entityId])
+  @@index([chapterId])
+  @@index([commitId])
+}
+
+model StoryRelation {
+  id           String      @id @default(uuid())
+  projectId    String
+  fromEntityId String
+  toEntityId   String
+  type         String
+  description  String?
+  createdAt    DateTime    @default(now())
+  updatedAt    DateTime    @updatedAt
+  project      Project     @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  fromEntity   StoryEntity @relation("StoryRelationFrom", fields: [fromEntityId], references: [id], onDelete: Cascade)
+  toEntity     StoryEntity @relation("StoryRelationTo", fields: [toEntityId], references: [id], onDelete: Cascade)
+
+  @@unique([projectId, fromEntityId, toEntityId, type])
+  @@index([projectId])
+  @@index([fromEntityId])
+  @@index([toEntityId])
+  @@index([type])
 }

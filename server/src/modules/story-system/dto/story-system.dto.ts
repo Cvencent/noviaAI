@@ -69,9 +69,34 @@ export class StoryExtractionResultDto {
   @IsOptional()
   entityDeltas?: unknown[]
 
+  @IsArray()
+  @IsOptional()
+  openLoops?: unknown[]
+
+  @IsArray()
+  @IsOptional()
+  entities?: unknown[]
+
+  @IsArray()
+  @IsOptional()
+  relations?: unknown[]
+
   @IsString()
   @IsOptional()
   summaryText?: string
+}
+
+export class RepairChapterDto {
+  @IsString()
+  content!: string
+
+  @IsString()
+  @IsOptional()
+  instruction?: string
+
+  @IsString()
+  @IsOptional()
+  repairPlanId?: string
 }
 
 export class CreateChapterCommitDto {

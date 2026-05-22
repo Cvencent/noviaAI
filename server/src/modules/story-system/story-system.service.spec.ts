@@ -78,9 +78,48 @@ describe('StorySystemService', () => {
         create: jest.fn(),
         findMany: jest.fn(),
         findFirst: jest.fn(),
+        update: jest.fn(),
       },
       chapterSummary: {
         create: jest.fn(),
+      },
+      reviewReport: {
+        create: jest.fn(),
+        findMany: jest.fn(),
+      },
+      reviewIssue: {
+        createMany: jest.fn(),
+        findMany: jest.fn(),
+      },
+      repairPlan: {
+        findFirst: jest.fn(),
+        create: jest.fn(),
+        findMany: jest.fn(),
+        update: jest.fn(),
+      },
+      storyEvent: {
+        createMany: jest.fn(),
+        findMany: jest.fn(),
+      },
+      characterState: {
+        createMany: jest.fn(),
+      },
+      openLoop: {
+        upsert: jest.fn(),
+        findMany: jest.fn(),
+      },
+      storyEntity: {
+        upsert: jest.fn(),
+        findMany: jest.fn(),
+        findFirst: jest.fn(),
+      },
+      entityMention: {
+        createMany: jest.fn(),
+        findMany: jest.fn(),
+      },
+      storyRelation: {
+        upsert: jest.fn(),
+        findMany: jest.fn(),
       },
       $transaction: jest.fn(async (callback: any) => callback(prisma)),
     }
@@ -196,7 +235,7 @@ describe('StorySystemService', () => {
     })
   })
 
-  it('blocks preflight when required contracts are missing or chapter content is empty', async () => {
+  it('blocks preflight when required contracts are missing but allows empty content for writing', async () => {
     mockProjectGraph()
     prisma.chapter.findFirst.mockResolvedValue({ ...chapter, contents: [] })
     prisma.storyContract.findMany.mockResolvedValue([{ type: 'MASTER_SETTING', payload: '{}' }])
@@ -208,9 +247,9 @@ describe('StorySystemService', () => {
     expect(result.blockingReasons).toEqual(
       expect.arrayContaining([
         '缺少 Story Contract: VOLUME_BRIEF, CHAPTER_BRIEF, REVIEW_CONTRACT',
-        '当前章节正文为空，无法进入审查和提交链路',
       ]),
     )
+    expect(result.blockingReasons).not.toContain('当前章节正文为空，无法进入审查和提交链路')
   })
 
   it('runs a persistent agent loop that can pause and resume from the next step', async () => {
@@ -333,21 +372,57 @@ describe('StorySystemService', () => {
     })
   })
 
-  it('does not call AI when Story System write preflight is blocking', async () => {
+  it('allows Story System write to draft from an empty chapter after contracts refresh', async () => {
     mockProjectGraph()
     prisma.chapter.findFirst.mockResolvedValue({ ...chapter, contents: [] })
-    prisma.storyContract.findMany.mockResolvedValue([{ type: 'MASTER_SETTING', payload: '{}' }])
+    prisma.storyContract.upsert.mockImplementation(({ create }: any) => Promise.resolve(create))
+    prisma.storyContract.findMany
+      .mockResolvedValueOnce([
+        { type: 'MASTER_SETTING', payload: '{}' },
+        { type: 'VOLUME_BRIEF', payload: '{}' },
+        { type: 'CHAPTER_BRIEF', payload: JSON.stringify({ chapterDirective: { goal: '打开雨夜旧港场景' } }) },
+        { type: 'REVIEW_CONTRACT', payload: JSON.stringify({ mustCheck: [], blockingRules: [] }) },
+      ])
+      .mockResolvedValueOnce([
+        { type: 'CHAPTER_BRIEF', payload: JSON.stringify({ chapterDirective: { goal: '打开雨夜旧港场景' } }) },
+        { type: 'REVIEW_CONTRACT', payload: JSON.stringify({ mustCheck: [], blockingRules: [] }) },
+      ])
     prisma.chapterCommit.findFirst.mockResolvedValue(null)
+    prisma.storyContextPack.create.mockImplementation(({ data }: any) => Promise.resolve({ id: 'pack-1', ...data }))
+    prisma.storyAgentRun.create.mockResolvedValue({
+      id: 'run-1',
+      projectId: 'project-1',
+      chapterId: 'chapter-1',
+      status: 'RUNNING',
+      currentStep: 'CONTEXT',
+      steps: [],
+    })
+    prisma.storyAgentStep.create.mockImplementation(({ data }: any) => Promise.resolve({ id: `${data.stepType}-1`, ...data }))
+    prisma.storyAgentRun.update.mockResolvedValue({ id: 'run-1', status: 'PAUSED', currentStep: 'REVIEW' })
+    aiService.chat.mockResolvedValue({ response: '雨线压低旧港的灯。' })
 
     const result = await service.writeChapter('user-1', 'project-1', 'chapter-1', {
       content: '',
       instruction: '写第一段',
     })
 
-    expect(result.blocked).toBe(true)
-    expect(result.preflight.blockingReasons).toContain('当前章节正文为空，无法进入审查和提交链路')
-    expect(aiService.chat).not.toHaveBeenCalled()
-    expect(prisma.storyAgentRun.create).not.toHaveBeenCalled()
+    expect(result.blocked).toBe(false)
+    expect(result.completion).toBe('雨线压低旧港的灯。')
+    expect(aiService.chat).toHaveBeenCalled()
+    expect(prisma.storyAgentRun.create).toHaveBeenCalled()
+  })
+
+  it('blocks an empty chapter commit without creating a commit', async () => {
+    mockProjectGraph()
+
+    await expect(
+      service.createChapterCommit('user-1', 'project-1', 'chapter-1', {
+        content: '   ',
+        reviewResult: { issues: [] },
+      }),
+    ).rejects.toBeInstanceOf(BadRequestException)
+
+    expect(prisma.chapterCommit.create).not.toHaveBeenCalled()
   })
 
   it('creates an accepted chapter commit and projects summary when review and fulfillment pass', async () => {
@@ -372,6 +447,12 @@ describe('StorySystemService', () => {
     prisma.chapterCommit.create.mockImplementation(({ data }: any) => Promise.resolve({ id: 'commit-1', ...data }))
     prisma.chapterSummary.create.mockResolvedValue({ id: 'summary-1' })
     prisma.chapter.update.mockResolvedValue({ id: 'chapter-1', summary: '林澄用芯片逼问沈遥。' })
+    prisma.storyEvent.createMany.mockResolvedValue({ count: 1 })
+    prisma.characterState.createMany.mockResolvedValue({ count: 1 })
+    prisma.openLoop.upsert.mockResolvedValue({ id: 'loop-1' })
+    prisma.storyEntity.upsert.mockImplementation(({ create }: any) => Promise.resolve({ id: `${create.type}-${create.name}`, ...create }))
+    prisma.entityMention.createMany.mockResolvedValue({ count: 1 })
+    prisma.storyRelation.upsert.mockResolvedValue({ id: 'relation-1' })
 
     const commit = await service.createChapterCommit('user-1', 'project-1', 'chapter-1', {
       content: '林澄拿出芯片，沈遥沉默。',
@@ -379,21 +460,41 @@ describe('StorySystemService', () => {
       extractionResult: {
         acceptedEvents: [{ eventType: 'EVIDENCE_REVEAL', subject: '林澄', payload: { item: '芯片' } }],
         stateDeltas: [{ entity: '沈遥', field: '心理', value: '动摇' }],
+        openLoops: [{ key: '芯片裂纹', title: '芯片裂纹尚未解释', status: 'OPEN' }],
+        entities: [{ name: '林澄', type: 'CHARACTER' }, { name: '芯片', type: 'ITEM' }],
+        relations: [{ from: '林澄', to: '芯片', type: 'POSSESSES', description: '林澄拿出芯片作为证据' }],
         summaryText: '林澄用芯片逼问沈遥。',
       },
     })
 
     expect(commit.status).toBe('ACCEPTED')
-    expect(JSON.parse(commit.projectionStatus).summary).toBe('DONE')
+    expect(JSON.parse(commit.projectionStatus)).toEqual(expect.objectContaining({
+      summary: 'DONE',
+      event: 'DONE',
+      state: 'DONE',
+      openLoop: 'DONE',
+      graph: 'DONE',
+    }))
     expect(prisma.chapterSummary.create).toHaveBeenCalledWith({
       data: {
         chapterId: 'chapter-1',
         summary: '林澄用芯片逼问沈遥。',
       },
     })
+    expect(prisma.storyEvent.createMany).toHaveBeenCalledWith({
+      data: [expect.objectContaining({ projectId: 'project-1', chapterId: 'chapter-1', commitId: 'commit-1', eventType: 'EVIDENCE_REVEAL' })],
+    })
+    expect(prisma.characterState.createMany).toHaveBeenCalledWith({
+      data: [expect.objectContaining({ projectId: 'project-1', chapterId: 'chapter-1', commitId: 'commit-1', characterName: '沈遥' })],
+    })
+    expect(prisma.openLoop.upsert).toHaveBeenCalledWith(expect.objectContaining({
+      where: { projectId_key: { projectId: 'project-1', key: '芯片裂纹' } },
+    }))
+    expect(prisma.entityMention.createMany).toHaveBeenCalled()
+    expect(prisma.storyRelation.upsert).toHaveBeenCalled()
   })
 
-  it('rejects a chapter commit when blocking review issues or missed nodes exist', async () => {
+  it('rejects a chapter commit and creates structured review report and repair plan', async () => {
     mockProjectGraph()
     prisma.storyContract.findMany.mockResolvedValue([
       {
@@ -408,6 +509,10 @@ describe('StorySystemService', () => {
       { type: 'REVIEW_CONTRACT', payload: JSON.stringify({ blockingRules: [] }) },
     ])
     prisma.chapterCommit.create.mockImplementation(({ data }: any) => Promise.resolve({ id: 'commit-1', ...data }))
+    prisma.reviewReport.create.mockResolvedValue({ id: 'report-1' })
+    prisma.reviewIssue.createMany.mockResolvedValue({ count: 3 })
+    prisma.repairPlan.create.mockResolvedValue({ id: 'repair-1', status: 'OPEN' })
+    prisma.chapterCommit.update.mockImplementation(({ data }: any) => Promise.resolve({ id: 'commit-1', ...data }))
 
     const commit = await service.createChapterCommit('user-1', 'project-1', 'chapter-1', {
       content: '沈遥主动承认全部秘密。',
@@ -418,6 +523,114 @@ describe('StorySystemService', () => {
     expect(commit.status).toBe('REJECTED')
     expect(JSON.parse(commit.fulfillmentResult).missedNodes).toContain('芯片')
     expect(JSON.parse(commit.projectionStatus).summary).toBe('SKIPPED')
+    expect(prisma.reviewReport.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({ projectId: 'project-1', chapterId: 'chapter-1', commitId: 'commit-1', status: 'BLOCKED' }),
+    })
+    expect(prisma.reviewIssue.createMany).toHaveBeenCalledWith({
+      data: expect.arrayContaining([
+        expect.objectContaining({ reportId: 'report-1', category: 'FULFILLMENT', blocking: true }),
+        expect.objectContaining({ reportId: 'report-1', category: 'CONTINUITY', blocking: true }),
+        expect.objectContaining({ reportId: 'report-1', category: 'STYLE', message: '越界泄密' }),
+      ]),
+    })
+    expect(prisma.repairPlan.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({ projectId: 'project-1', chapterId: 'chapter-1', commitId: 'commit-1', reportId: 'report-1', status: 'OPEN' }),
+    })
+    expect(prisma.chapterCommit.update).toHaveBeenCalledWith({
+      where: { id: 'commit-1' },
+      data: expect.objectContaining({ blockingReasons: expect.any(String), repairPlanId: 'repair-1' }),
+    })
+  })
+
+  it('lists repair plans, review reports, open loops, graph entities, and graph paths', async () => {
+    mockProjectGraph()
+    prisma.repairPlan.findMany.mockResolvedValue([{ id: 'repair-1', status: 'OPEN' }])
+    prisma.reviewReport.findMany.mockResolvedValue([{ id: 'report-1', issues: [{ id: 'issue-1' }] }])
+    prisma.openLoop.findMany.mockResolvedValue([{ id: 'loop-1', key: '芯片裂纹' }])
+    prisma.storyEntity.findMany.mockResolvedValue([{ id: 'entity-1', name: '林澄' }])
+    prisma.storyEntity.findFirst
+      .mockResolvedValueOnce({ id: 'entity-a', name: '林澄' })
+      .mockResolvedValueOnce({ id: 'entity-b', name: '芯片' })
+    prisma.storyRelation.findMany.mockResolvedValue([{ fromEntityId: 'entity-a', toEntityId: 'entity-b', type: 'POSSESSES' }])
+
+    await expect(service.listRepairPlans('user-1', 'project-1', 'chapter-1')).resolves.toEqual([{ id: 'repair-1', status: 'OPEN' }])
+    await expect(service.listReviewReports('user-1', 'project-1', 'chapter-1')).resolves.toEqual([{ id: 'report-1', issues: [{ id: 'issue-1' }] }])
+    await expect(service.listOpenLoops('user-1', 'project-1')).resolves.toEqual([{ id: 'loop-1', key: '芯片裂纹' }])
+    await expect(service.listGraphEntities('user-1', 'project-1')).resolves.toEqual([{ id: 'entity-1', name: '林澄' }])
+    await expect(service.findGraphPath('user-1', 'project-1', '林澄', '芯片')).resolves.toEqual({
+      from: { id: 'entity-a', name: '林澄' },
+      to: { id: 'entity-b', name: '芯片' },
+      relations: [{ fromEntityId: 'entity-a', toEntityId: 'entity-b', type: 'POSSESSES' }],
+    })
+  })
+
+  it('creates a repair agent step from an open repair plan without changing chapter content', async () => {
+    mockProjectGraph()
+    prisma.repairPlan.findFirst.mockResolvedValue({
+      id: 'repair-1',
+      projectId: 'project-1',
+      chapterId: 'chapter-1',
+      status: 'OPEN',
+      steps: JSON.stringify([{ order: 1, action: '补写芯片证据' }]),
+    })
+    prisma.storyAgentRun.create.mockResolvedValue({
+      id: 'run-1',
+      projectId: 'project-1',
+      chapterId: 'chapter-1',
+      status: 'RUNNING',
+      currentStep: 'REPAIR',
+      steps: [],
+    })
+    prisma.storyAgentStep.create.mockImplementation(({ data }: any) => Promise.resolve({ id: 'repair-step-1', ...data }))
+    prisma.storyAgentRun.update.mockResolvedValue({ id: 'run-1', status: 'PAUSED', currentStep: 'REVIEW' })
+    aiService.chat.mockResolvedValue({ response: '林澄把芯片裂纹推到灯下。' })
+
+    const result = await service.repairChapter('user-1', 'project-1', 'chapter-1', {
+      content: '沈遥沉默。',
+      repairPlanId: 'repair-1',
+      instruction: '只补证据，不改结尾',
+    })
+
+    expect(result.repairedText).toBe('林澄把芯片裂纹推到灯下。')
+    expect(result.runId).toBe('run-1')
+    expect(result.repairPlanId).toBe('repair-1')
+    expect(prisma.storyAgentStep.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({
+        runId: 'run-1',
+        stepType: 'REPAIR',
+        status: 'COMPLETED',
+      }),
+    })
+    expect(prisma.chapter.update).not.toHaveBeenCalled()
+  })
+
+  it('rebuilds projections from accepted commits', async () => {
+    mockProjectGraph()
+    prisma.chapterCommit.findMany.mockResolvedValue([
+      {
+        id: 'commit-1',
+        projectId: 'project-1',
+        chapterId: 'chapter-1',
+        status: 'ACCEPTED',
+        extractionResult: JSON.stringify({
+          summaryText: '林澄用芯片逼问沈遥。',
+          acceptedEvents: [{ eventType: 'EVIDENCE_REVEAL', subject: '林澄' }],
+        }),
+        summaryText: '林澄用芯片逼问沈遥。',
+      },
+    ])
+    prisma.chapterSummary.create.mockResolvedValue({ id: 'summary-1' })
+    prisma.chapter.update.mockResolvedValue({ id: 'chapter-1' })
+    prisma.storyEvent.createMany.mockResolvedValue({ count: 1 })
+
+    const result = await service.rebuildProjections('user-1', 'project-1')
+
+    expect(result.rebuiltCommits).toBe(1)
+    expect(prisma.chapterCommit.findMany).toHaveBeenCalledWith({
+      where: { projectId: 'project-1', status: 'ACCEPTED' },
+      orderBy: { createdAt: 'asc' },
+    })
+    expect(prisma.storyEvent.createMany).toHaveBeenCalled()
   })
 
   it('reports runtime health from contracts, commits, context packs, and agent runs', async () => {
