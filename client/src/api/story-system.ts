@@ -258,6 +258,18 @@ export interface StoryGraphSearchResult {
   }>
 }
 
+export interface StoryGraphAnswer {
+  projectId: string
+  question: string
+  status: 'ANSWERED' | 'NO_EVIDENCE' | string
+  answer: string
+  sources: StoryGraphSearchResult['results']
+  related: {
+    openLoops: OpenLoop[]
+    worldFacts: WorldStateFact[]
+  }
+}
+
 export const storySystemApi = {
   async refreshContracts(projectId: string, chapterId: string): Promise<{ contracts: StoryContract[] }> {
     const response = await apiClient.post(
@@ -390,6 +402,13 @@ export const storySystemApi = {
 
   async searchStoryGraph(projectId: string, query: string): Promise<StoryGraphSearchResult> {
     const response = await apiClient.get(`/projects/${projectId}/story-graph/search`, {
+      params: { q: query },
+    })
+    return response.data
+  },
+
+  async askStoryGraph(projectId: string, query: string): Promise<StoryGraphAnswer> {
+    const response = await apiClient.get(`/projects/${projectId}/story-graph/ask`, {
       params: { q: query },
     })
     return response.data

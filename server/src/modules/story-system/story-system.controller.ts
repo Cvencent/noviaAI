@@ -186,6 +186,15 @@ export class StorySystemController {
     return this.storySystemService.searchStoryGraph(user.id, projectId, query)
   }
 
+  @Get('story-graph/ask')
+  askStoryGraph(
+    @CurrentUser() user: any,
+    @Param('projectId') projectId: string,
+    @Query('q') query: string,
+  ) {
+    return this.storySystemService.askStoryGraph(user.id, projectId, query)
+  }
+
   @Post('story-system/projections/rebuild')
   rebuildProjections(
     @CurrentUser() user: any,

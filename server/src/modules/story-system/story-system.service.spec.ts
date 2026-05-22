@@ -1196,6 +1196,33 @@ describe('StorySystemService', () => {
     expect(openaiProvider.embed).toHaveBeenCalledWith('芯片', 'text-embedding-3-small')
   })
 
+  it('answers story graph questions with ranked evidence and related memory', async () => {
+    mockProjectGraph()
+    openaiProvider.embed.mockResolvedValue([1, 0])
+    prisma.storyVectorIndex.findMany.mockResolvedValue([
+      { id: 'v1', sourceType: 'WORLD_FACT', sourceId: 'fact-1', text: 'memory chip crack points to tampering', embeddingJson: JSON.stringify([0.9, 0.1]), metadata: JSON.stringify({ title: 'chip crack' }) },
+      { id: 'v2', sourceType: 'OPEN_LOOP', sourceId: 'loop-1', text: 'rain alley clue remains open', embeddingJson: JSON.stringify([0.1, 0.9]), metadata: JSON.stringify({ title: 'rain alley' }) },
+    ])
+    prisma.openLoop.findMany.mockResolvedValue([
+      { id: 'loop-1', key: 'chip-crack', title: 'chip crack unresolved', status: 'OPEN' },
+    ])
+    prisma.worldStateFact.findMany.mockResolvedValue([
+      { id: 'fact-1', key: 'chip-rule', category: 'RULE', value: 'memory chips can be tampered with', commitId: 'commit-1' },
+    ])
+
+    const answer = await service.askStoryGraph('user-1', 'project-1', 'what does the chip crack mean?')
+
+    expect(answer).toEqual(expect.objectContaining({
+      projectId: 'project-1',
+      question: 'what does the chip crack mean?',
+      status: 'ANSWERED',
+    }))
+    expect(answer.answer).toContain('memory chip crack points to tampering')
+    expect(answer.sources[0]).toEqual(expect.objectContaining({ sourceId: 'fact-1' }))
+    expect(answer.related.openLoops).toHaveLength(1)
+    expect(answer.related.worldFacts).toHaveLength(1)
+  })
+
   it('creates a repair agent step from an open repair plan without changing chapter content', async () => {
     mockProjectGraph()
     prisma.repairPlan.findFirst.mockResolvedValue({

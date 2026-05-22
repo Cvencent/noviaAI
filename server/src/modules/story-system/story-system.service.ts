@@ -1364,6 +1364,38 @@ ${overrideTrace.map((trace) => `- ${trace.chapterId}: ${trace.reason}`).join('\n
     return { projectId, query: normalizedQuery, results }
   }
 
+  async askStoryGraph(userId: string, projectId: string, question = '') {
+    const normalizedQuestion = this.normalizeText(question)
+    const search = await this.searchStoryGraph(userId, projectId, normalizedQuestion)
+    const [openLoops, worldFacts] = await Promise.all([
+      this.prisma.openLoop.findMany({
+        where: { projectId, status: 'OPEN' },
+        orderBy: { updatedAt: 'desc' },
+        take: 5,
+      }),
+      this.prisma.worldStateFact.findMany({
+        where: { projectId },
+        orderBy: { createdAt: 'desc' },
+        take: 5,
+      }),
+    ])
+    const sources = search.results.slice(0, 5)
+    const answer = sources.length
+      ? sources.map((source, index) => `${index + 1}. ${source.text}`).join('\n')
+      : 'No ranked story graph evidence found for this question.'
+    return {
+      projectId,
+      question: normalizedQuestion,
+      status: sources.length ? 'ANSWERED' : 'NO_EVIDENCE',
+      answer,
+      sources,
+      related: {
+        openLoops,
+        worldFacts,
+      },
+    }
+  }
+
   private async executeRunStep(userId: string, run: any, stepType: StoryAgentStepType) {
     const steps = await this.prisma.storyAgentStep.findMany({
       where: { runId: run.id },

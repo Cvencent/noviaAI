@@ -3,7 +3,7 @@ import { useParams } from 'react-router-dom'
 import { Search, GitBranch, CircleDot } from 'lucide-react'
 import { Button } from '../components/ui/Button'
 import { Input } from '../components/ui/Input'
-import { OpenLoop, StoryEntity, WorldStateFact, storySystemApi } from '../api/story-system'
+import { OpenLoop, StoryEntity, StoryGraphAnswer, WorldStateFact, storySystemApi } from '../api/story-system'
 
 export function StoryGraphWorkbench() {
   const { projectId } = useParams<{ projectId: string }>()
@@ -15,6 +15,8 @@ export function StoryGraphWorkbench() {
   const [pathResult, setPathResult] = useState<any>(null)
   const [searchQuery, setSearchQuery] = useState('')
   const [searchResults, setSearchResults] = useState<any[]>([])
+  const [question, setQuestion] = useState('')
+  const [answer, setAnswer] = useState<StoryGraphAnswer | null>(null)
   const [isLoading, setIsLoading] = useState(false)
 
   useEffect(() => {
@@ -52,12 +54,66 @@ export function StoryGraphWorkbench() {
     }
   }
 
+  const askGraph = async () => {
+    if (!projectId || !question.trim()) return
+    setIsLoading(true)
+    try {
+      setAnswer(await storySystemApi.askStoryGraph(projectId, question.trim()))
+    } finally {
+      setIsLoading(false)
+    }
+  }
+
   return (
     <div className="min-h-screen bg-gray-50 p-6">
       <div className="mx-auto max-w-6xl space-y-6">
         <div>
           <h1 className="text-2xl font-bold text-gray-900">Story Graph</h1>
           <p className="mt-1 text-sm text-gray-600">实体、伏笔、世界事实和关系路径</p>
+        </div>
+
+        <div className="rounded-lg border border-gray-200 bg-white p-4">
+          <div className="mb-3 flex items-center gap-2 text-sm font-medium text-gray-900">
+            <Search className="h-4 w-4" />
+            Story Graph 问答
+          </div>
+          <div className="grid gap-2 md:grid-cols-[1fr_auto]">
+            <Input value={question} onChange={(event) => setQuestion(event.target.value)} placeholder="询问实体、伏笔、世界事实或章节记忆" />
+            <Button onClick={askGraph} isLoading={isLoading}>提问</Button>
+          </div>
+          {answer && (
+            <div className="mt-3 space-y-3 rounded border border-gray-100 bg-gray-50 p-3 text-sm">
+              <div className="flex items-center justify-between gap-2">
+                <span className="font-medium text-gray-900">{answer.status}</span>
+                <span className="text-xs text-gray-500">{answer.sources.length} sources</span>
+              </div>
+              <div className="whitespace-pre-wrap text-gray-700">{answer.answer}</div>
+              {answer.sources.length > 0 && (
+                <div className="space-y-2">
+                  {answer.sources.slice(0, 3).map((source) => (
+                    <div key={source.id} className="rounded border border-gray-200 bg-white p-2 text-xs">
+                      <div className="font-medium text-gray-700">{source.sourceType} · {source.score.toFixed(3)}</div>
+                      <div className="mt-1 text-gray-600">{source.text}</div>
+                    </div>
+                  ))}
+                </div>
+              )}
+              <div className="grid gap-2 md:grid-cols-2">
+                <div className="rounded border border-gray-200 bg-white p-2 text-xs">
+                  <div className="font-medium text-gray-700">Open loops</div>
+                  {answer.related.openLoops.slice(0, 3).map((loop) => (
+                    <div key={loop.id} className="mt-1 text-gray-600">{loop.title || loop.key} · {loop.status}</div>
+                  ))}
+                </div>
+                <div className="rounded border border-gray-200 bg-white p-2 text-xs">
+                  <div className="font-medium text-gray-700">World facts</div>
+                  {answer.related.worldFacts.slice(0, 3).map((fact) => (
+                    <div key={fact.id} className="mt-1 text-gray-600">{fact.key}: {fact.value}</div>
+                  ))}
+                </div>
+              </div>
+            </div>
+          )}
         </div>
 
         <div className="rounded-lg border border-gray-200 bg-white p-4">
