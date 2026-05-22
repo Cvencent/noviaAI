@@ -14,6 +14,7 @@ import { StyleApplicationService } from '../writing-styles/style-application.ser
 import {
   ContinueStoryAgentRunDto,
   CreateChapterCommitDto,
+  CreateProjectionJobDto,
   ExportBookDto,
   FullBookAiReviewDto,
   GeneratePublishingAssetsDto,
@@ -595,7 +596,14 @@ ${dto.content}`
   async reviewChapter(userId: string, projectId: string, chapterId: string, content?: string) {
     const { chapter } = await this.loadProjectChapter(userId, projectId, chapterId)
     const text = content || this.chapterText(chapter)
-    const contracts = this.contractMap(await this.getContracts(projectId, chapterId))
+    const [contractsList, dismissedPlans] = await Promise.all([
+      this.getContracts(projectId, chapterId),
+      this.prisma.repairPlan.findMany({
+        where: { projectId, chapterId, status: 'DISMISSED' },
+        orderBy: { updatedAt: 'desc' },
+      }),
+    ])
+    const contracts = this.contractMap(contractsList)
     const forbiddenZones = [
       ...this.asArray(contracts.CHAPTER_BRIEF?.chapterDirective?.forbiddenZones),
       ...this.asArray(contracts.REVIEW_CONTRACT?.blockingRules),
@@ -615,7 +623,11 @@ ${dto.content}`
           endOffset: startOffset + zone.length,
         }
       })
-    return { issues, blockingCount: issues.length }
+    return {
+      issues,
+      blockingCount: issues.length,
+      overrideTrace: this.overrideTraceFromRepairPlans(dismissedPlans),
+    }
   }
 
   async getRuntimeHealth(userId: string, projectId: string, chapterId: string) {
@@ -665,22 +677,107 @@ ${dto.content}`
   }
 
   async rebuildProjections(userId: string, projectId: string) {
+    const job = await this.createProjectionJob(userId, projectId, { scope: 'ALL' })
+    return { ...job, rebuiltCommits: job.totalItems }
+  }
+
+  async createProjectionJob(userId: string, projectId: string, dto: CreateProjectionJobDto = {}) {
     await this.loadProject(userId, projectId)
+    const scope = (dto.scope || 'ALL').toUpperCase()
+    if (scope === 'CHAPTER' && !dto.chapterId) {
+      throw new BadRequestException('CHAPTER scope requires chapterId')
+    }
+    const where: any = { projectId, status: 'ACCEPTED' }
+    if (scope === 'CHAPTER') {
+      where.chapterId = dto.chapterId
+    }
     const commits = await this.prisma.chapterCommit.findMany({
-      where: { projectId, status: 'ACCEPTED' },
+      where,
       orderBy: { createdAt: 'asc' },
     })
-    for (const commit of commits) {
-      const extractionResult = this.parseJson(commit.extractionResult, {})
-      await this.applyAcceptedProjections(
+    const selectedCommits = scope === 'FAILED'
+      ? commits.filter((commit: any) => this.hasFailedProjection(commit.projectionStatus))
+      : commits
+    const pendingItems = selectedCommits.map((commit: any) => ({
+      commitId: commit.id,
+      chapterId: commit.chapterId,
+      status: 'PENDING',
+    }))
+    const job = await this.prisma.projectionJob.create({
+      data: {
         projectId,
-        commit.chapterId,
-        commit.id,
-        commit.summaryText || extractionResult.summaryText || this.buildFallbackSummary(commit.contentSnapshot),
-        extractionResult,
-      )
+        scope,
+        status: 'RUNNING',
+        totalItems: pendingItems.length,
+        doneItems: 0,
+        failedItems: 0,
+        items: JSON.stringify(pendingItems),
+      },
+    })
+
+    const completedItems = []
+    for (const commit of selectedCommits) {
+      const item: any = {
+        commitId: commit.id,
+        chapterId: commit.chapterId,
+        status: 'DONE',
+      }
+      try {
+        const extractionResult = this.parseJson(commit.extractionResult, {})
+        const projectionStatus = await this.applyAcceptedProjections(
+          projectId,
+          commit.chapterId,
+          commit.id,
+          commit.summaryText || extractionResult.summaryText || this.buildFallbackSummary(commit.contentSnapshot),
+          extractionResult,
+        )
+        item.projectionStatus = projectionStatus
+        if (Object.values(projectionStatus).some((value) => value === 'FAILED')) {
+          item.status = 'FAILED'
+          item.error = projectionStatus.error || projectionStatus.eventError || projectionStatus.stateError || projectionStatus.worldError || projectionStatus.openLoopError || projectionStatus.graphError || 'Projection failed'
+        }
+        await this.prisma.chapterCommit.update({
+          where: { id: commit.id },
+          data: { projectionStatus: JSON.stringify(projectionStatus) },
+        })
+        await this.tryIndexCommitVector(projectId, { ...commit, projectionStatus: JSON.stringify(projectionStatus) })
+      } catch (error: any) {
+        item.status = 'FAILED'
+        item.error = error.message || 'Projection failed'
+      }
+      completedItems.push(item)
     }
-    return { projectId, rebuiltCommits: commits.length }
+
+    const failedItems = completedItems.filter((item) => item.status === 'FAILED').length
+    const doneItems = completedItems.length - failedItems
+    const status = failedItems ? 'FAILED' : 'DONE'
+    const updatedJob = await this.prisma.projectionJob.update({
+      where: { id: job.id },
+      data: {
+        status,
+        doneItems,
+        failedItems,
+        error: failedItems ? `${failedItems} projection item(s) failed` : undefined,
+        items: JSON.stringify(completedItems),
+      },
+    })
+    return {
+      projectId,
+      jobId: updatedJob.id,
+      status: updatedJob.status,
+      totalItems: selectedCommits.length,
+      doneItems,
+      failedItems,
+      items: completedItems,
+    }
+  }
+
+  async listProjectionJobs(userId: string, projectId: string) {
+    await this.loadProject(userId, projectId)
+    return this.prisma.projectionJob.findMany({
+      where: { projectId },
+      orderBy: { createdAt: 'desc' },
+    })
   }
 
   async listReviewReports(userId: string, projectId: string, chapterId: string) {
@@ -1070,12 +1167,8 @@ ${chapterBriefs.join('\n')}
       return `第 ${chapter.order + 1} 章《${chapter.title}》：${this.truncate(this.markdownText(text), 260)}`
     })
     const overrideTrace = dismissedPlans
-      .filter((plan: any) => plan.overrideReason)
-      .map((plan: any) => ({
-        repairPlanId: plan.id,
-        chapterId: plan.chapterId,
-        reason: plan.overrideReason,
-      }))
+      ? this.overrideTraceFromRepairPlans(dismissedPlans)
+      : []
     const prompt = `你是长篇小说全书审查编辑。请做 AI 级全书审查，重点覆盖结构、风格统一、节奏、人物弧线、伏笔回收。
 
 项目：${project.title}
@@ -1623,6 +1716,16 @@ ${this.chapterText(chapter)}`
       recommendations: ['请重新运行全书 AI 审查'],
       overrideTrace,
     }
+  }
+
+  private overrideTraceFromRepairPlans(plans: any[]) {
+    return this.asArray(plans)
+      .filter((plan: any) => plan?.overrideReason)
+      .map((plan: any) => ({
+        repairPlanId: plan.id,
+        chapterId: plan.chapterId,
+        reason: plan.overrideReason,
+      }))
   }
 
   private escapeXml(value: unknown) {

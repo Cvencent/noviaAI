@@ -80,6 +80,7 @@ model Project {
   storyRelations          StoryRelation[]
   publishingAssets        PublishingAsset[]
   storyVectorIndexes      StoryVectorIndex[]
+  projectionJobs          ProjectionJob[]
 
   // 写作风格配置
   currentWritingStyleId String?
@@ -115,6 +116,24 @@ model StoryVectorIndex {
   @@unique([projectId, sourceType, sourceId])
   @@index([projectId])
   @@index([sourceType])
+}
+
+model ProjectionJob {
+  id         String   @id @default(uuid())
+  projectId  String
+  scope      String
+  status     String   @default("PENDING")
+  totalItems Int      @default(0)
+  doneItems  Int      @default(0)
+  failedItems Int     @default(0)
+  error      String?
+  items      String
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+  project    Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  @@index([projectId])
+  @@index([status])
 }
 
 model WorldSetting {

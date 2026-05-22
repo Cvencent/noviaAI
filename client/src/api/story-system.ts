@@ -221,6 +221,30 @@ export interface PublishChecklist {
   }>
 }
 
+export interface ProjectionJob {
+  id: string
+  projectId: string
+  scope: string
+  status: 'PENDING' | 'RUNNING' | 'DONE' | 'FAILED' | string
+  totalItems: number
+  doneItems: number
+  failedItems: number
+  error?: string
+  items: string
+  createdAt: string
+  updatedAt: string
+}
+
+export interface ProjectionJobResult {
+  projectId: string
+  jobId: string
+  status: 'PENDING' | 'RUNNING' | 'DONE' | 'FAILED' | string
+  totalItems: number
+  doneItems: number
+  failedItems: number
+  items?: Array<Record<string, unknown>>
+}
+
 export interface StoryGraphSearchResult {
   projectId: string
   query: string
@@ -393,6 +417,16 @@ export const storySystemApi = {
 
   async getPublishChecklist(projectId: string): Promise<PublishChecklist> {
     const response = await apiClient.get(`/projects/${projectId}/story-system/publish-checklist`)
+    return response.data
+  },
+
+  async createProjectionJob(projectId: string, data: { scope?: 'ALL' | 'FAILED' | 'CHAPTER' | string; chapterId?: string } = {}): Promise<ProjectionJobResult> {
+    const response = await apiClient.post(`/projects/${projectId}/story-system/projections/jobs`, data)
+    return response.data
+  },
+
+  async listProjectionJobs(projectId: string): Promise<ProjectionJob[]> {
+    const response = await apiClient.get(`/projects/${projectId}/story-system/projections/jobs`)
     return response.data
   },
 

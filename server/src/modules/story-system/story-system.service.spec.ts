@@ -125,6 +125,11 @@ describe('StorySystemService', () => {
         findMany: jest.fn(),
         upsert: jest.fn(),
       },
+      projectionJob: {
+        create: jest.fn(),
+        update: jest.fn(),
+        findMany: jest.fn(),
+      },
       storyEntity: {
         upsert: jest.fn(),
         findMany: jest.fn(),
@@ -547,6 +552,40 @@ describe('StorySystemService', () => {
         endOffset: content.indexOf('沈遥主动承认全部秘密') + '沈遥主动承认全部秘密'.length,
       }),
     )
+  })
+
+  it('returns dismissed repair plan override trace during chapter review', async () => {
+    mockProjectGraph()
+    prisma.storyContract.findMany.mockResolvedValue([
+      {
+        type: 'CHAPTER_BRIEF',
+        payload: JSON.stringify({
+          chapterDirective: {
+            forbiddenZones: ['forbidden reveal'],
+          },
+        }),
+      },
+      { type: 'REVIEW_CONTRACT', payload: JSON.stringify({ blockingRules: [] }) },
+    ])
+    prisma.repairPlan.findMany.mockResolvedValue([
+      {
+        id: 'repair-1',
+        chapterId: 'chapter-1',
+        status: 'DISMISSED',
+        overrideReason: 'author intentionally keeps this apparent contradiction',
+      },
+    ])
+
+    const result = await service.reviewChapter('user-1', 'project-1', 'chapter-1', 'forbidden reveal')
+
+    expect(result.overrideTrace).toEqual([
+      {
+        repairPlanId: 'repair-1',
+        chapterId: 'chapter-1',
+        reason: 'author intentionally keeps this apparent contradiction',
+      },
+    ])
+    expect(result.issues[0]).toEqual(expect.objectContaining({ blocking: true }))
   })
 
   it('creates an accepted chapter commit and projects summary when review and fulfillment pass', async () => {
@@ -1154,7 +1193,7 @@ describe('StorySystemService', () => {
     expect(prisma.chapter.update).not.toHaveBeenCalled()
   })
 
-  it('rebuilds projections from accepted commits', async () => {
+  it('creates a projection job and records item states while rebuilding accepted commits', async () => {
     mockProjectGraph()
     prisma.chapterCommit.findMany.mockResolvedValue([
       {
@@ -1172,15 +1211,83 @@ describe('StorySystemService', () => {
     prisma.chapterSummary.create.mockResolvedValue({ id: 'summary-1' })
     prisma.chapter.update.mockResolvedValue({ id: 'chapter-1' })
     prisma.storyEvent.createMany.mockResolvedValue({ count: 1 })
+    prisma.projectionJob.create.mockImplementation(({ data }: any) => Promise.resolve({ id: 'job-1', ...data }))
+    prisma.projectionJob.update.mockImplementation(({ data }: any) => Promise.resolve({ id: 'job-1', ...data }))
 
-    const result = await service.rebuildProjections('user-1', 'project-1')
+    const result = await service.createProjectionJob('user-1', 'project-1', { scope: 'ALL' })
 
-    expect(result.rebuiltCommits).toBe(1)
+    expect(result).toEqual(expect.objectContaining({ jobId: 'job-1', status: 'DONE', totalItems: 1 }))
     expect(prisma.chapterCommit.findMany).toHaveBeenCalledWith({
       where: { projectId: 'project-1', status: 'ACCEPTED' },
       orderBy: { createdAt: 'asc' },
     })
+    expect(prisma.projectionJob.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({
+        projectId: 'project-1',
+        scope: 'ALL',
+        status: 'RUNNING',
+        totalItems: 1,
+        items: expect.stringContaining('"status":"PENDING"'),
+      }),
+    })
+    expect(prisma.projectionJob.update).toHaveBeenCalledWith({
+      where: { id: 'job-1' },
+      data: expect.objectContaining({
+        status: 'DONE',
+        doneItems: 1,
+        failedItems: 0,
+        items: expect.stringContaining('"status":"DONE"'),
+      }),
+    })
     expect(prisma.storyEvent.createMany).toHaveBeenCalled()
+  })
+
+  it('reruns only accepted commits with failed projection status', async () => {
+    mockProjectGraph()
+    prisma.chapterCommit.findMany.mockResolvedValue([
+      {
+        id: 'commit-ok',
+        projectId: 'project-1',
+        chapterId: 'chapter-1',
+        status: 'ACCEPTED',
+        projectionStatus: JSON.stringify({ summary: 'DONE' }),
+        summaryText: 'ok',
+      },
+      {
+        id: 'commit-failed',
+        projectId: 'project-1',
+        chapterId: 'chapter-1',
+        status: 'ACCEPTED',
+        projectionStatus: JSON.stringify({ summary: 'FAILED' }),
+        summaryText: 'retry me',
+      },
+    ])
+    prisma.chapterSummary.create.mockResolvedValue({ id: 'summary-1' })
+    prisma.chapter.update.mockResolvedValue({ id: 'chapter-1' })
+    prisma.projectionJob.create.mockImplementation(({ data }: any) => Promise.resolve({ id: 'job-1', ...data }))
+    prisma.projectionJob.update.mockImplementation(({ data }: any) => Promise.resolve({ id: 'job-1', ...data }))
+
+    const result = await service.createProjectionJob('user-1', 'project-1', { scope: 'FAILED' })
+
+    expect(result).toEqual(expect.objectContaining({ jobId: 'job-1', status: 'DONE', totalItems: 1 }))
+    expect(prisma.projectionJob.create.mock.calls[0][0].data.items).toContain('commit-failed')
+    expect(prisma.projectionJob.create.mock.calls[0][0].data.items).not.toContain('commit-ok')
+  })
+
+  it('lists projection jobs for a project newest first', async () => {
+    mockProjectGraph()
+    prisma.projectionJob.findMany.mockResolvedValue([
+      { id: 'job-2', projectId: 'project-1', status: 'FAILED', items: '[]' },
+      { id: 'job-1', projectId: 'project-1', status: 'DONE', items: '[]' },
+    ])
+
+    const jobs = await service.listProjectionJobs('user-1', 'project-1')
+
+    expect(jobs).toHaveLength(2)
+    expect(prisma.projectionJob.findMany).toHaveBeenCalledWith({
+      where: { projectId: 'project-1' },
+      orderBy: { createdAt: 'desc' },
+    })
   })
 
   it('reports runtime health from contracts, commits, context packs, and agent runs', async () => {

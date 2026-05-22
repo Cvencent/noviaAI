@@ -166,3 +166,13 @@ export class FullBookAiReviewDto {
   @IsOptional()
   focus?: 'ALL' | 'STRUCTURE' | 'STYLE' | string
 }
+
+export class CreateProjectionJobDto {
+  @IsString()
+  @IsOptional()
+  scope?: 'ALL' | 'FAILED' | 'CHAPTER' | string
+
+  @IsString()
+  @IsOptional()
+  chapterId?: string
+}

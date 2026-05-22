@@ -5,6 +5,7 @@ import { StorySystemService } from './story-system.service'
 import {
   ContinueStoryAgentRunDto,
   CreateChapterCommitDto,
+  CreateProjectionJobDto,
   DismissRepairPlanDto,
   ExportBookDto,
   FullBookAiReviewDto,
@@ -191,6 +192,23 @@ export class StorySystemController {
     @Param('projectId') projectId: string,
   ) {
     return this.storySystemService.rebuildProjections(user.id, projectId)
+  }
+
+  @Post('story-system/projections/jobs')
+  createProjectionJob(
+    @CurrentUser() user: any,
+    @Param('projectId') projectId: string,
+    @Body() dto: CreateProjectionJobDto,
+  ) {
+    return this.storySystemService.createProjectionJob(user.id, projectId, dto)
+  }
+
+  @Get('story-system/projections/jobs')
+  listProjectionJobs(
+    @CurrentUser() user: any,
+    @Param('projectId') projectId: string,
+  ) {
+    return this.storySystemService.listProjectionJobs(user.id, projectId)
   }
 
   @Get('story-system/full-book-review')

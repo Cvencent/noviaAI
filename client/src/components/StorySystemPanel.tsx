@@ -16,6 +16,7 @@ import { DiffViewer } from './DiffViewer'
 import {
   ChapterCommit,
   OpenLoop,
+  ProjectionJob,
   PublishChecklist,
   RepairPlan,
   ReviewIssue,
@@ -85,6 +86,7 @@ export function StorySystemPanel({
   const [worldFacts, setWorldFacts] = useState<WorldStateFact[]>([])
   const [graphEntities, setGraphEntities] = useState<StoryEntity[]>([])
   const [publishChecklist, setPublishChecklist] = useState<PublishChecklist | null>(null)
+  const [projectionJobs, setProjectionJobs] = useState<ProjectionJob[]>([])
   const [activeTab, setActiveTab] = useState<StoryPanelTab>('overview')
   const [run, setRun] = useState<StoryAgentRun | null>(null)
   const [instruction, setInstruction] = useState('')
@@ -112,7 +114,7 @@ export function StorySystemPanel({
   }, [projectId, chapterId])
 
   const loadStatus = async () => {
-    const [healthData, commitData, reportData, repairData, loopData, factData, entityData, checklistData] = await Promise.all([
+    const [healthData, commitData, reportData, repairData, loopData, factData, entityData, checklistData, projectionJobData] = await Promise.all([
       storySystemApi.health(projectId, chapterId).catch(() => null),
       storySystemApi.listCommits(projectId, chapterId).catch(() => []),
       storySystemApi.listReviewReports(projectId, chapterId).catch(() => []),
@@ -121,6 +123,7 @@ export function StorySystemPanel({
       storySystemApi.listWorldFacts(projectId).catch(() => []),
       storySystemApi.listGraphEntities(projectId).catch(() => []),
       storySystemApi.getPublishChecklist(projectId).catch(() => null),
+      storySystemApi.listProjectionJobs(projectId).catch(() => []),
     ])
     setHealth(healthData)
     setCommits(commitData)
@@ -130,6 +133,7 @@ export function StorySystemPanel({
     setWorldFacts(factData)
     setGraphEntities(entityData)
     setPublishChecklist(checklistData)
+    setProjectionJobs(projectionJobData)
   }
 
   const runAction = async (label: string, action: () => Promise<void>) => {
@@ -245,6 +249,14 @@ export function StorySystemPanel({
       warnings: [],
       missingContracts: [],
     })
+  })
+
+  const createProjectionJob = (scope: 'ALL' | 'FAILED' | 'CHAPTER') => runAction('ProjectionJob', async () => {
+    await storySystemApi.createProjectionJob(projectId, {
+      scope,
+      chapterId: scope === 'CHAPTER' ? chapterId : undefined,
+    })
+    setProjectionJobs(await storySystemApi.listProjectionJobs(projectId))
   })
 
   return (
@@ -559,6 +571,16 @@ export function StorySystemPanel({
                 {publishChecklist.status}
               </span>
             </div>
+            <div className="grid grid-cols-2 gap-2">
+              <Button variant="outline" size="sm" onClick={() => createProjectionJob('FAILED')} isLoading={isBusy}>
+                <RefreshCw className="w-4 h-4 mr-2" />
+                重跑失败投影
+              </Button>
+              <Button variant="outline" size="sm" onClick={() => createProjectionJob('CHAPTER')} isLoading={isBusy}>
+                <RefreshCw className="w-4 h-4 mr-2" />
+                重算本章投影
+              </Button>
+            </div>
             <div className="space-y-2">
               {publishChecklist.checks.map((check) => (
                 <div key={check.key} className="rounded-lg border border-gray-200 p-3 text-xs">
@@ -573,6 +595,30 @@ export function StorySystemPanel({
                 </div>
               ))}
             </div>
+            {projectionJobs.length > 0 && (
+              <div className="space-y-2">
+                <div className="text-xs font-medium text-gray-700">Projection Jobs</div>
+                {projectionJobs.slice(0, 4).map((job) => {
+                  const items = parseJson(job.items) || []
+                  return (
+                    <details key={job.id} className="rounded-lg border border-gray-200 p-3 text-xs">
+                      <summary className="cursor-pointer font-medium text-gray-800">
+                        {job.scope} · {job.status} · {job.doneItems}/{job.totalItems}
+                      </summary>
+                      {job.error && <div className="mt-2 text-red-700">{job.error}</div>}
+                      <div className="mt-2 space-y-1">
+                        {items.slice(0, 5).map((item: any, index: number) => (
+                          <div key={`${item.commitId || index}`} className={item.status === 'FAILED' ? 'text-red-700' : 'text-gray-600'}>
+                            {item.chapterId || 'chapter'} · {item.commitId || 'commit'} · {item.status}
+                            {item.error && <span> · {item.error}</span>}
+                          </div>
+                        ))}
+                      </div>
+                    </details>
+                  )
+                })}
+              </div>
+            )}
           </section>
         )}
 
