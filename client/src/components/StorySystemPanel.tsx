@@ -242,13 +242,30 @@ export function StorySystemPanel({
     onApplyRepair?.(repairPreview)
     const result = await storySystemApi.review(projectId, chapterId, repairPreview)
     onHighlightIssues?.(result.issues || [])
+    const blockingIssues = (result.issues || []).filter((issue: any) => issue.blocking)
     setPreflight({
       chapterId,
-      blocking: result.blockingCount > 0,
-      blockingReasons: (result.issues || []).filter((issue: any) => issue.blocking).map((issue: any) => issue.message),
+      blocking: blockingIssues.length > 0,
+      blockingReasons: blockingIssues.map((issue: any) => issue.message),
       warnings: [],
       missingContracts: [],
     })
+    if (blockingIssues.length === 0) {
+      await storySystemApi.createCommit(projectId, chapterId, {
+        content: repairPreview,
+        runId: run?.id,
+        reviewResult: result,
+        extractionResult: {
+          acceptedEvents: [{ eventType: 'REPAIR_ACCEPTED', subject: 'chapter' }],
+          stateDeltas: [],
+          entityDeltas: [],
+          summaryText: repairPreview.replace(/<[^>]*>/g, '').replace(/\s+/g, ' ').trim().slice(0, 120),
+        },
+      })
+      setRepairPreview('')
+      setCommits(await storySystemApi.listCommits(projectId, chapterId))
+      await loadStatus()
+    }
   })
 
   const createProjectionJob = (scope: 'ALL' | 'FAILED' | 'CHAPTER') => runAction('ProjectionJob', async () => {
