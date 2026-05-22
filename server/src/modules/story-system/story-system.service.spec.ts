@@ -1056,9 +1056,27 @@ describe('StorySystemService', () => {
       response: '```json\n{"status":"WARNING","summary":"结构基本成立，但中段节奏偏急。","structureIssues":[{"severity":"NORMAL","message":"第二章承接略跳"}],"styleIssues":[{"severity":"MINOR","message":"雨巷段落语气偏散"}],"pacingIssues":[],"characterArcIssues":[],"openLoopIssues":[{"severity":"NORMAL","message":"芯片裂纹尚未回收"}],"recommendations":["补一段过渡"]}\n```',
     })
 
+    prisma.storyAgentRun.create.mockResolvedValue({ id: 'run-ai-review' })
+
     const review = await service.reviewFullBookWithAi('user-1', 'project-1', { focus: 'ALL' })
 
     expect(review.status).toBe('WARNING')
+    expect(prisma.storyAgentRun.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({
+        projectId: 'project-1',
+        chapterId: null,
+        mode: 'FULL_BOOK_AI_REVIEW',
+        status: 'COMPLETED',
+        currentStep: 'REVIEW',
+      }),
+    })
+    expect(prisma.storyAgentStep.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({
+        stepType: 'REVIEW',
+        status: 'COMPLETED',
+        output: expect.stringContaining('"status":"WARNING"'),
+      }),
+    })
     expect(review.summary).toContain('结构基本成立')
     expect(review.structureIssues).toEqual([expect.objectContaining({ message: '第二章承接略跳' })])
     expect(review.styleIssues).toEqual([expect.objectContaining({ message: '雨巷段落语气偏散' })])
@@ -1152,6 +1170,50 @@ describe('StorySystemService', () => {
         key: 'projectionJobs',
         status: 'WARNING',
         message: expect.stringContaining('FAILED'),
+      }),
+    ]))
+  })
+
+  it('includes the latest full-book AI review status in the publish checklist', async () => {
+    mockProjectGraph()
+    prisma.chapter.findMany.mockResolvedValue([
+      { id: 'chapter-1', title: 'Chapter One', order: 0, contents: [{ order: 0, content: 'Draft text.' }] },
+    ])
+    prisma.chapterCommit.findMany.mockResolvedValue([
+      {
+        id: 'commit-1',
+        chapterId: 'chapter-1',
+        status: 'ACCEPTED',
+        projectionStatus: JSON.stringify({ summary: 'DONE' }),
+        createdAt: new Date('2026-05-22T01:00:00Z'),
+      },
+    ])
+    prisma.reviewReport.findMany.mockResolvedValue([])
+    prisma.openLoop.findMany.mockResolvedValue([])
+    prisma.publishingAsset.findFirst.mockResolvedValue({ id: 'asset-1', coverSvg: '<svg/>', synopsis: 'Synopsis' })
+    prisma.projectionJob.findMany.mockResolvedValue([])
+    prisma.storyAgentRun.findFirst.mockResolvedValue({
+      id: 'run-ai-review',
+      status: 'COMPLETED',
+      updatedAt: new Date('2026-05-22T02:00:00Z'),
+      steps: [
+        {
+          output: JSON.stringify({
+            status: 'WARNING',
+            summary: 'Style drift in the middle chapters.',
+          }),
+        },
+      ],
+    })
+
+    const checklist = await service.getPublishChecklist('user-1', 'project-1')
+
+    expect(checklist.status).toBe('WARNING')
+    expect(checklist.checks).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        key: 'aiReview',
+        status: 'WARNING',
+        message: expect.stringContaining('Style drift'),
       }),
     ]))
   })

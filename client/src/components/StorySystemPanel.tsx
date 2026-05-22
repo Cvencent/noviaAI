@@ -8,6 +8,7 @@ import {
   Play,
   RefreshCw,
   Send,
+  Sparkles,
   X,
 } from 'lucide-react'
 import { Button } from './ui/Button'
@@ -15,6 +16,7 @@ import { Textarea } from './ui/Textarea'
 import { DiffViewer } from './DiffViewer'
 import {
   ChapterCommit,
+  FullBookAiReview,
   OpenLoop,
   ProjectionJob,
   PublishChecklist,
@@ -86,6 +88,7 @@ export function StorySystemPanel({
   const [worldFacts, setWorldFacts] = useState<WorldStateFact[]>([])
   const [graphEntities, setGraphEntities] = useState<StoryEntity[]>([])
   const [publishChecklist, setPublishChecklist] = useState<PublishChecklist | null>(null)
+  const [fullBookAiReview, setFullBookAiReview] = useState<FullBookAiReview | null>(null)
   const [projectionJobs, setProjectionJobs] = useState<ProjectionJob[]>([])
   const [activeTab, setActiveTab] = useState<StoryPanelTab>('overview')
   const [run, setRun] = useState<StoryAgentRun | null>(null)
@@ -274,6 +277,11 @@ export function StorySystemPanel({
       chapterId: scope === 'CHAPTER' ? chapterId : undefined,
     })
     setProjectionJobs(await storySystemApi.listProjectionJobs(projectId))
+  })
+
+  const runFullBookAiReview = () => runAction('Full-book AI review', async () => {
+    setFullBookAiReview(await storySystemApi.reviewFullBookWithAi(projectId, { focus: 'ALL' }))
+    setPublishChecklist(await storySystemApi.getPublishChecklist(projectId))
   })
 
   return (
@@ -596,6 +604,10 @@ export function StorySystemPanel({
               </span>
             </div>
             <div className="grid grid-cols-2 gap-2">
+              <Button variant="outline" size="sm" onClick={runFullBookAiReview} isLoading={isBusy}>
+                <Sparkles className="w-4 h-4 mr-2" />
+                AI review
+              </Button>
               <Button variant="outline" size="sm" onClick={() => createProjectionJob('FAILED')} isLoading={isBusy}>
                 <RefreshCw className="w-4 h-4 mr-2" />
                 重跑失败投影
@@ -605,6 +617,15 @@ export function StorySystemPanel({
                 重算本章投影
               </Button>
             </div>
+            {fullBookAiReview && (
+              <div className="rounded-lg border border-indigo-100 bg-indigo-50 p-3 text-xs text-indigo-950">
+                <div className="font-medium">AI full-book review · {fullBookAiReview.status}</div>
+                <div className="mt-1 leading-5">{fullBookAiReview.summary}</div>
+                <div className="mt-1 text-indigo-800">
+                  structure {fullBookAiReview.structureIssues.length} · style {fullBookAiReview.styleIssues.length} · pacing {fullBookAiReview.pacingIssues.length}
+                </div>
+              </div>
+            )}
             <div className="space-y-2">
               {publishChecklist.checks.map((check) => (
                 <div key={check.key} className="rounded-lg border border-gray-200 p-3 text-xs">

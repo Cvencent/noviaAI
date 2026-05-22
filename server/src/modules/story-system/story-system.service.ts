@@ -1204,11 +1204,7 @@ ${overrideTrace.map((trace) => `- ${trace.chapterId}: ${trace.reason}`).join('\n
       action: AIAction.TEXT_COMPLETION,
     })
     const parsed = this.parseJson(this.extractJsonText(aiResult?.response || aiResult), null)
-    if (!parsed) {
-      return this.fullBookAiReviewFallback(projectId, overrideTrace)
-    }
-
-    return {
+    const review = parsed ? {
       projectId,
       status: ['PASS', 'WARNING', 'BLOCKED'].includes(parsed.status) ? parsed.status : 'WARNING',
       summary: this.normalizeText(parsed.summary, 'AI 全书审查已完成。'),
@@ -1219,12 +1215,14 @@ ${overrideTrace.map((trace) => `- ${trace.chapterId}: ${trace.reason}`).join('\n
       openLoopIssues: this.asArray(parsed.openLoopIssues),
       recommendations: this.asArray(parsed.recommendations).map((item) => this.normalizeText(item)).filter(Boolean),
       overrideTrace,
-    }
+    } : this.fullBookAiReviewFallback(projectId, overrideTrace)
+    await this.persistFullBookAiReview(projectId, dto.focus || 'ALL', review)
+    return review
   }
 
   async getPublishChecklist(userId: string, projectId: string) {
     const ruleReview = await this.reviewFullBook(userId, projectId)
-    const [asset, commits, openLoops, projectionJobs] = await Promise.all([
+    const [asset, commits, openLoops, projectionJobs, latestAiReviewRun] = await Promise.all([
       this.prisma.publishingAsset?.findFirst?.({
         where: { projectId },
         orderBy: { updatedAt: 'desc' },
@@ -1242,10 +1240,23 @@ ${overrideTrace.map((trace) => `- ${trace.chapterId}: ${trace.reason}`).join('\n
         orderBy: { createdAt: 'desc' },
         take: 1,
       }) ?? Promise.resolve([]),
+      this.prisma.storyAgentRun?.findFirst?.({
+        where: { projectId, mode: 'FULL_BOOK_AI_REVIEW' },
+        orderBy: { updatedAt: 'desc' },
+        include: {
+          steps: {
+            where: { stepType: 'REVIEW' },
+            orderBy: { createdAt: 'desc' },
+            take: 1,
+          },
+        },
+      }) ?? Promise.resolve(null),
     ])
     const projectionFailures = commits.filter((commit: any) => this.hasFailedProjection(commit.projectionStatus)).length
     const latestProjectionJob = projectionJobs[0]
     const projectionJobWarning = latestProjectionJob && latestProjectionJob.status !== 'DONE'
+    const latestAiReview = this.parseJson(latestAiReviewRun?.steps?.[0]?.output, null)
+    const aiReviewStatus = latestAiReview?.status || 'WARNING'
     const checks = [
       {
         key: 'commits',
@@ -1260,6 +1271,13 @@ ${overrideTrace.map((trace) => `- ${trace.chapterId}: ${trace.reason}`).join('\n
         status: ruleReview.summary.blockingReports === 0 ? 'PASS' : 'BLOCKED',
         message: `${ruleReview.summary.blockingReports} 个阻塞审查报告`,
         action: '处理阻塞审查',
+      },
+      {
+        key: 'aiReview',
+        label: 'AI full-book review',
+        status: latestAiReview ? aiReviewStatus : 'WARNING',
+        message: latestAiReview?.summary || 'No full-book AI review has been recorded',
+        action: latestAiReview ? 'Review AI recommendations before export' : 'Run full-book AI review',
       },
       {
         key: 'cover',
@@ -1800,6 +1818,35 @@ ${this.chapterText(chapter)}`
       openLoopIssues: [],
       recommendations: ['请重新运行全书 AI 审查'],
       overrideTrace,
+    }
+  }
+
+  private async persistFullBookAiReview(projectId: string, focus: string, review: any) {
+    try {
+      const run = await this.prisma.storyAgentRun?.create?.({
+        data: {
+          projectId,
+          chapterId: null,
+          mode: 'FULL_BOOK_AI_REVIEW',
+          status: 'COMPLETED',
+          currentStep: 'REVIEW',
+          instruction: `focus:${focus}`,
+          metadata: JSON.stringify({ focus, status: review.status }),
+        },
+      })
+      if (!run?.id) return
+      await this.prisma.storyAgentStep?.create?.({
+        data: {
+          runId: run.id,
+          stepType: 'REVIEW',
+          status: 'COMPLETED',
+          input: JSON.stringify({ focus }),
+          output: JSON.stringify(review),
+          order: 0,
+        },
+      })
+    } catch {
+      // Publishing checks should still work if review trace persistence fails.
     }
   }
 
