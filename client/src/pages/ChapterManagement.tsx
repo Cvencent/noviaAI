@@ -190,6 +190,15 @@ export function ChapterManagement() {
     URL.revokeObjectURL(url)
   }
 
+  const downloadCoverSvg = () => {
+    if (!publishingAssets?.coverSvg) return
+    downloadExport({
+      content: publishingAssets.coverSvg,
+      mimeType: 'image/svg+xml',
+      fileName: `${publishingAssets.title || 'cover'}-cover.svg`,
+    })
+  }
+
   const handleExportBook = async (format: 'MARKDOWN' | 'EPUB' | 'PDF') => {
     if (!projectId) return
     setIsStoryActionBusy(true)
@@ -346,19 +355,33 @@ export function ChapterManagement() {
                 收起
               </Button>
             </div>
-            <div className="mt-3 space-y-3 text-sm text-gray-700">
-              <p className="leading-6">{publishingAssets.synopsis}</p>
-              {publishingAssets.sellingPoints.length > 0 && (
-                <div className="flex flex-wrap gap-2">
-                  {publishingAssets.sellingPoints.map((point) => (
-                    <span key={point} className="rounded border border-gray-200 px-2 py-1 text-xs text-gray-700">
-                      {point}
-                    </span>
-                  ))}
+            <div className="mt-3 grid gap-4 lg:grid-cols-[180px_1fr]">
+              {publishingAssets.coverSvg && (
+                <div className="space-y-2">
+                  <div
+                    className="aspect-[2/3] overflow-hidden rounded border border-gray-200 bg-gray-50"
+                    dangerouslySetInnerHTML={{ __html: publishingAssets.coverSvg }}
+                  />
+                  <Button variant="outline" size="sm" onClick={downloadCoverSvg} className="w-full">
+                    <Download className="w-4 h-4 mr-2" />
+                    下载封面 SVG
+                  </Button>
                 </div>
               )}
-              <div className="rounded border border-gray-100 bg-gray-50 p-3 text-xs leading-5 text-gray-600">
-                {publishingAssets.coverPrompt}
+              <div className="space-y-3 text-sm text-gray-700">
+                <p className="leading-6">{publishingAssets.synopsis}</p>
+                {publishingAssets.sellingPoints.length > 0 && (
+                  <div className="flex flex-wrap gap-2">
+                    {publishingAssets.sellingPoints.map((point) => (
+                      <span key={point} className="rounded border border-gray-200 px-2 py-1 text-xs text-gray-700">
+                        {point}
+                      </span>
+                    ))}
+                  </div>
+                )}
+                <div className="rounded border border-gray-100 bg-gray-50 p-3 text-xs leading-5 text-gray-600">
+                  {publishingAssets.coverPrompt}
+                </div>
               </div>
             </div>
           </div>
