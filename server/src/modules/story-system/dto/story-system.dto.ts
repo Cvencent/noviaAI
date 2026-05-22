@@ -150,3 +150,13 @@ export class ExportBookDto {
   @IsOptional()
   format?: 'MARKDOWN' | 'EPUB' | 'PDF' | string
 }
+
+export class GeneratePublishingAssetsDto {
+  @IsString()
+  @IsOptional()
+  audience?: string
+
+  @IsString()
+  @IsOptional()
+  tone?: string
+}

@@ -7,6 +7,7 @@ import {
   CreateChapterCommitDto,
   DismissRepairPlanDto,
   ExportBookDto,
+  GeneratePublishingAssetsDto,
   RepairChapterDto,
   StartStoryAgentRunDto,
   WriteChapterDto,
@@ -197,6 +198,15 @@ export class StorySystemController {
     @Body() dto: ExportBookDto,
   ) {
     return this.storySystemService.exportBook(user.id, projectId, dto)
+  }
+
+  @Post('story-system/publishing-assets')
+  generatePublishingAssets(
+    @CurrentUser() user: any,
+    @Param('projectId') projectId: string,
+    @Body() dto: GeneratePublishingAssetsDto,
+  ) {
+    return this.storySystemService.generatePublishingAssets(user.id, projectId, dto)
   }
 
   @Post('chapters/:chapterId/story-system/agent-runs')

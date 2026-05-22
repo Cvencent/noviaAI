@@ -12,13 +12,14 @@ import {
   Eye,
   Download,
   ShieldCheck,
+  Sparkles,
 } from 'lucide-react'
 import { Button } from '../components/ui/Button'
 import { Card } from '../components/ui/Card'
 import { Input } from '../components/ui/Input'
 import { Modal } from '../components/ui/Modal'
 import { chaptersApi, Chapter } from '../api/chapters'
-import { FullBookReview, storySystemApi } from '../api/story-system'
+import { FullBookReview, PublishingAssets, storySystemApi } from '../api/story-system'
 
 const STATUS_CONFIG = {
   draft: { label: '草稿', icon: Clock, color: 'text-yellow-600 bg-yellow-50' },
@@ -41,6 +42,7 @@ export function ChapterManagement() {
   const [newChapterTitle, setNewChapterTitle] = useState('')
   const [draggedIndex, setDraggedIndex] = useState<number | null>(null)
   const [fullBookReview, setFullBookReview] = useState<FullBookReview | null>(null)
+  const [publishingAssets, setPublishingAssets] = useState<PublishingAssets | null>(null)
   const [isStoryActionBusy, setIsStoryActionBusy] = useState(false)
 
   useEffect(() => {
@@ -181,6 +183,18 @@ export function ChapterManagement() {
     }
   }
 
+  const handleGeneratePublishingAssets = async () => {
+    if (!projectId) return
+    setIsStoryActionBusy(true)
+    try {
+      setPublishingAssets(await storySystemApi.generatePublishingAssets(projectId))
+    } catch (error) {
+      console.error('出版素材生成失败:', error)
+    } finally {
+      setIsStoryActionBusy(false)
+    }
+  }
+
   const filteredChapters = chapters.filter(chapter => {
     const matchesSearch = !searchQuery ||
       chapter.title.toLowerCase().includes(searchQuery.toLowerCase())
@@ -217,6 +231,10 @@ export function ChapterManagement() {
               <Download className="w-4 h-4 mr-2" />
               导出 Markdown
             </Button>
+            <Button variant="outline" onClick={handleGeneratePublishingAssets} isLoading={isStoryActionBusy}>
+              <Sparkles className="w-4 h-4 mr-2" />
+              出版素材
+            </Button>
             <Button onClick={() => setShowCreateModal(true)}>
             <Plus className="w-4 h-4 mr-2" />
             新建章节
@@ -252,6 +270,37 @@ export function ChapterManagement() {
                 ))}
               </div>
             )}
+          </div>
+        )}
+
+        {publishingAssets && (
+          <div className="mb-6 rounded-lg border border-gray-200 bg-white p-4">
+            <div className="flex items-center justify-between gap-4">
+              <div>
+                <div className="text-sm font-medium text-gray-900">出版素材 · {publishingAssets.title}</div>
+                <div className="mt-1 text-xs text-gray-500">
+                  accepted {publishingAssets.sourceStats.acceptedChapters}/{publishingAssets.sourceStats.chapters}
+                </div>
+              </div>
+              <Button variant="ghost" size="sm" onClick={() => setPublishingAssets(null)}>
+                收起
+              </Button>
+            </div>
+            <div className="mt-3 space-y-3 text-sm text-gray-700">
+              <p className="leading-6">{publishingAssets.synopsis}</p>
+              {publishingAssets.sellingPoints.length > 0 && (
+                <div className="flex flex-wrap gap-2">
+                  {publishingAssets.sellingPoints.map((point) => (
+                    <span key={point} className="rounded border border-gray-200 px-2 py-1 text-xs text-gray-700">
+                      {point}
+                    </span>
+                  ))}
+                </div>
+              )}
+              <div className="rounded border border-gray-100 bg-gray-50 p-3 text-xs leading-5 text-gray-600">
+                {publishingAssets.coverPrompt}
+              </div>
+            </div>
           </div>
         )}
 

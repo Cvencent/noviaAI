@@ -179,6 +179,18 @@ export interface BookExportResult {
   content: string
 }
 
+export interface PublishingAssets {
+  projectId: string
+  title: string
+  synopsis: string
+  sellingPoints: string[]
+  coverPrompt: string
+  sourceStats: {
+    chapters: number
+    acceptedChapters: number
+  }
+}
+
 export const storySystemApi = {
   async refreshContracts(projectId: string, chapterId: string): Promise<{ contracts: StoryContract[] }> {
     const response = await apiClient.post(
@@ -309,6 +321,11 @@ export const storySystemApi = {
 
   async exportBook(projectId: string, data: { format?: 'MARKDOWN' | 'EPUB' | 'PDF' | string } = {}): Promise<BookExportResult> {
     const response = await apiClient.post(`/projects/${projectId}/story-system/export`, data)
+    return response.data
+  },
+
+  async generatePublishingAssets(projectId: string, data: { audience?: string; tone?: string } = {}): Promise<PublishingAssets> {
+    const response = await apiClient.post(`/projects/${projectId}/story-system/publishing-assets`, data)
     return response.data
   },
 

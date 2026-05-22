@@ -11,6 +11,7 @@ import {
   ContinueStoryAgentRunDto,
   CreateChapterCommitDto,
   ExportBookDto,
+  GeneratePublishingAssetsDto,
   RepairChapterDto,
   StartStoryAgentRunDto,
   StoryAgentMode,
@@ -888,6 +889,75 @@ ${dto.content}`
     }
   }
 
+  async generatePublishingAssets(userId: string, projectId: string, dto: GeneratePublishingAssetsDto = {}) {
+    const project = await this.loadProject(userId, projectId)
+    const [chapters, commits] = await Promise.all([
+      this.prisma.chapter.findMany({
+        where: { projectId },
+        include: { contents: { orderBy: { order: 'asc' } } },
+        orderBy: { order: 'asc' },
+      }),
+      this.prisma.chapterCommit.findMany({
+        where: { projectId, status: 'ACCEPTED' },
+        orderBy: { createdAt: 'desc' },
+      }),
+    ])
+    const latestAcceptedByChapter = new Map<string, any>()
+    for (const commit of commits.filter((item: any) => item.status === 'ACCEPTED')) {
+      if (!latestAcceptedByChapter.has(commit.chapterId)) {
+        latestAcceptedByChapter.set(commit.chapterId, commit)
+      }
+    }
+    const chapterBriefs = chapters.map((chapter: any) => {
+      const commit = latestAcceptedByChapter.get(chapter.id)
+      const text = commit?.summaryText || commit?.contentSnapshot || this.chapterText(chapter)
+      return `第 ${chapter.order + 1} 章《${chapter.title}》：${this.truncate(this.markdownText(text), 220)}`
+    })
+    const prompt = `你是长篇小说出版包装编辑。请基于项目信息和章节内容，生成可用于导出的出版素材。
+
+项目：${project.title}
+类型：${project.genre || '未填写'}
+原简介：${project.synopsis || '未填写'}
+标签：${project.tags || '未填写'}
+目标读者：${dto.audience || '网络小说读者'}
+包装语气：${dto.tone || '清晰、有吸引力、不过度剧透'}
+
+章节依据：
+${chapterBriefs.join('\n')}
+
+只输出 JSON，不要 Markdown 代码块：
+{
+  "synopsis": "200-300字简介",
+  "sellingPoints": ["卖点1", "卖点2", "卖点3"],
+  "coverPrompt": "封面生成提示词，包含主体、场景、色彩、风格和应避免的元素"
+}`
+    const aiResult = await this.aiService.chat(userId, {
+      projectId,
+      message: prompt,
+      temperature: 0.4,
+      maxTokens: 1200,
+      action: AIAction.TEXT_COMPLETION,
+    })
+    const parsed = this.parseJson(this.extractJsonText(aiResult?.response || aiResult), {})
+    const fallbackSynopsis = project.synopsis || chapterBriefs.join('\n')
+    const sellingPoints = this.asArray(parsed.sellingPoints)
+      .map((item) => this.normalizeText(item))
+      .filter(Boolean)
+      .slice(0, 6)
+
+    return {
+      projectId,
+      title: project.title,
+      synopsis: this.normalizeText(parsed.synopsis, this.truncate(fallbackSynopsis, 300)),
+      sellingPoints: sellingPoints.length ? sellingPoints : this.buildPublishingSellingPointFallbacks(project),
+      coverPrompt: this.normalizeText(parsed.coverPrompt, `${project.title}，${project.genre || '小说'}封面，核心意象来自章节内容`),
+      sourceStats: {
+        chapters: chapters.length,
+        acceptedChapters: latestAcceptedByChapter.size,
+      },
+    }
+  }
+
   private async executeRunStep(userId: string, run: any, stepType: StoryAgentStepType) {
     const steps = await this.prisma.storyAgentStep.findMany({
       where: { runId: run.id },
@@ -1051,6 +1121,28 @@ ${this.chapterText(chapter)}`
   private safeFileName(value?: string) {
     const name = this.normalizeText(value, 'book').replace(/[\\/:*?"<>|]/g, '').trim()
     return name || 'book'
+  }
+
+  private extractJsonText(value: unknown) {
+    const text = this.normalizeText(value)
+    const fenced = text.match(/```(?:json)?\s*([\s\S]*?)```/i)
+    if (fenced?.[1]) {
+      return fenced[1].trim()
+    }
+    const start = text.indexOf('{')
+    const end = text.lastIndexOf('}')
+    return start >= 0 && end > start ? text.slice(start, end + 1) : text
+  }
+
+  private buildPublishingSellingPointFallbacks(project: any) {
+    const tags = this.normalizeText(project.tags)
+      .split(/[,，、;；\s]+/)
+      .map((tag) => tag.trim())
+      .filter(Boolean)
+    return [
+      project.genre ? `${project.genre} genre hook` : `${project.title} story premise`,
+      ...tags.map((tag) => `${tag} element`),
+    ].slice(0, 6)
   }
 
   private nextStep(step: StoryAgentStepType) {

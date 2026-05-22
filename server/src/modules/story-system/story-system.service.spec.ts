@@ -841,6 +841,61 @@ describe('StorySystemService', () => {
     expect(exported.content).toContain('沈遥消失在雨巷。')
   })
 
+  it('generates publishing assets from accepted chapter snapshots', async () => {
+    mockProjectGraph()
+    prisma.chapter.findMany.mockResolvedValue([
+      { id: 'chapter-1', title: '旧港质问', order: 0, contents: [{ order: 0, content: '草稿文本。' }] },
+      { id: 'chapter-2', title: '雨巷追踪', order: 1, contents: [{ order: 0, content: '第二章草稿。' }] },
+    ])
+    prisma.chapterCommit.findMany.mockResolvedValue([
+      { id: 'commit-1', chapterId: 'chapter-1', status: 'ACCEPTED', contentSnapshot: '林澄拿出芯片。', summaryText: '旧港出现记忆芯片。' },
+    ])
+    aiService.chat.mockResolvedValue({
+      response: JSON.stringify({
+        synopsis: '一座记忆交易城市里，调查员追查芯片真相。',
+        sellingPoints: ['记忆交易悬疑设定', '双主角身份博弈'],
+        coverPrompt: '雨夜城市，霓虹旧港，破裂的记忆芯片，悬疑小说封面',
+      }),
+    })
+
+    const assets = await service.generatePublishingAssets('user-1', 'project-1', { audience: '悬疑读者' })
+
+    expect(assets.projectId).toBe('project-1')
+    expect(assets.synopsis).toContain('记忆交易城市')
+    expect(assets.sellingPoints).toEqual(['记忆交易悬疑设定', '双主角身份博弈'])
+    expect(assets.coverPrompt).toContain('霓虹旧港')
+    expect(assets.sourceStats).toEqual({ chapters: 2, acceptedChapters: 1 })
+    expect(aiService.chat).toHaveBeenCalledWith('user-1', expect.objectContaining({
+      projectId: 'project-1',
+      action: expect.any(String),
+      message: expect.stringContaining('悬疑读者'),
+    }))
+  })
+
+  it('falls back publishing selling points when AI omits them', async () => {
+    mockProjectGraph()
+    prisma.project.findUnique.mockResolvedValue({
+      ...project,
+      title: 'Memory City',
+      genre: 'Urban suspense',
+      tags: 'memory, mystery',
+      synopsis: 'A city runs on traded memories.',
+    })
+    prisma.chapter.findMany.mockResolvedValue([
+      { id: 'chapter-1', title: 'Old Port', order: 0, contents: [{ order: 0, content: 'Lin finds a memory chip.' }] },
+    ])
+    prisma.chapterCommit.findMany.mockResolvedValue([])
+    aiService.chat.mockResolvedValue({
+      response: '```json\n{"synopsis":"A tighter market-ready synopsis.","sellingPoints":[],"coverPrompt":"Rainy neon port cover"}\n```',
+    })
+
+    const assets = await service.generatePublishingAssets('user-1', 'project-1', {})
+
+    expect(assets.synopsis).toBe('A tighter market-ready synopsis.')
+    expect(assets.coverPrompt).toBe('Rainy neon port cover')
+    expect(assets.sellingPoints).toEqual(['Urban suspense genre hook', 'memory element', 'mystery element'])
+  })
+
   it('creates a repair agent step from an open repair plan without changing chapter content', async () => {
     mockProjectGraph()
     prisma.repairPlan.findFirst.mockResolvedValue({
