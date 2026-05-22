@@ -1224,7 +1224,7 @@ ${overrideTrace.map((trace) => `- ${trace.chapterId}: ${trace.reason}`).join('\n
 
   async getPublishChecklist(userId: string, projectId: string) {
     const ruleReview = await this.reviewFullBook(userId, projectId)
-    const [asset, commits, openLoops] = await Promise.all([
+    const [asset, commits, openLoops, projectionJobs] = await Promise.all([
       this.prisma.publishingAsset?.findFirst?.({
         where: { projectId },
         orderBy: { updatedAt: 'desc' },
@@ -1237,8 +1237,15 @@ ${overrideTrace.map((trace) => `- ${trace.chapterId}: ${trace.reason}`).join('\n
         where: { projectId, status: 'OPEN' },
         orderBy: { updatedAt: 'desc' },
       }),
+      this.prisma.projectionJob?.findMany?.({
+        where: { projectId },
+        orderBy: { createdAt: 'desc' },
+        take: 1,
+      }) ?? Promise.resolve([]),
     ])
     const projectionFailures = commits.filter((commit: any) => this.hasFailedProjection(commit.projectionStatus)).length
+    const latestProjectionJob = projectionJobs[0]
+    const projectionJobWarning = latestProjectionJob && latestProjectionJob.status !== 'DONE'
     const checks = [
       {
         key: 'commits',
@@ -1274,6 +1281,15 @@ ${overrideTrace.map((trace) => `- ${trace.chapterId}: ${trace.reason}`).join('\n
         status: projectionFailures ? 'WARNING' : 'PASS',
         message: `${projectionFailures} 个 accepted commit 存在投影失败`,
         action: '重跑 projections',
+      },
+      {
+        key: 'projectionJobs',
+        label: 'ProjectionJob',
+        status: projectionJobWarning ? 'WARNING' : 'PASS',
+        message: latestProjectionJob
+          ? `Latest projection job ${latestProjectionJob.status}: ${latestProjectionJob.doneItems}/${latestProjectionJob.totalItems} done, ${latestProjectionJob.failedItems} failed`
+          : 'No projection jobs recorded',
+        action: projectionJobWarning ? 'Review or rerun projection jobs' : 'No action needed',
       },
       {
         key: 'exports',

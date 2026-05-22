@@ -1113,6 +1113,49 @@ describe('StorySystemService', () => {
     ]))
   })
 
+  it('includes latest projection job status in the publish checklist', async () => {
+    mockProjectGraph()
+    prisma.chapter.findMany.mockResolvedValue([
+      { id: 'chapter-1', title: 'Chapter One', order: 0, contents: [{ order: 0, content: 'Draft text.' }] },
+    ])
+    prisma.chapterCommit.findMany.mockResolvedValue([
+      {
+        id: 'commit-1',
+        chapterId: 'chapter-1',
+        status: 'ACCEPTED',
+        projectionStatus: JSON.stringify({ summary: 'DONE' }),
+        createdAt: new Date('2026-05-22T01:00:00Z'),
+      },
+    ])
+    prisma.reviewReport.findMany.mockResolvedValue([])
+    prisma.openLoop.findMany.mockResolvedValue([])
+    prisma.publishingAsset.findFirst.mockResolvedValue({ id: 'asset-1', coverSvg: '<svg/>', synopsis: 'Synopsis' })
+    prisma.projectionJob.findMany.mockResolvedValue([
+      {
+        id: 'job-1',
+        projectId: 'project-1',
+        scope: 'FAILED',
+        status: 'FAILED',
+        totalItems: 2,
+        doneItems: 1,
+        failedItems: 1,
+        items: '[]',
+        createdAt: new Date('2026-05-22T03:00:00Z'),
+      },
+    ])
+
+    const checklist = await service.getPublishChecklist('user-1', 'project-1')
+
+    expect(checklist.status).toBe('WARNING')
+    expect(checklist.checks).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        key: 'projectionJobs',
+        status: 'WARNING',
+        message: expect.stringContaining('FAILED'),
+      }),
+    ]))
+  })
+
   it('indexes accepted commit summaries into vector memory', async () => {
     mockProjectGraph()
     openaiProvider.embed.mockResolvedValue([0.1, 0.2, 0.3])
