@@ -171,38 +171,73 @@ export class WritingConsistencyService {
 
   // 3. 生成风格提示词
   async generateStylePrompt(projectId: string): Promise<string> {
-    // TODO: 暂时返回默认提示词
+    const project = await this.prisma.project.findUnique({
+      where: { id: projectId },
+      select: { writingStyleConfig: true },
+    })
+
+    if (project?.writingStyleConfig) {
+      try {
+        const guide = JSON.parse(project.writingStyleConfig) as WritingStyleGuide
+        let prompt = '# 写作风格指南\n\n'
+
+        // 叙事风格
+        if (guide.narrative) {
+          prompt += '## 叙事风格\n'
+          if (guide.narrative.perspective) {
+            prompt += `- 视角：${this.getPerspectiveLabel(guide.narrative.perspective)}\n`
+          }
+          if (guide.narrative.tense) {
+            prompt += `- 时态：${guide.narrative.tense === 'past' ? '过去时' : '现在时'}\n`
+          }
+          if (guide.narrative.tone) {
+            prompt += `- 语气：${this.getToneLabel(guide.narrative.tone)}\n`
+          }
+          if (guide.narrative.pacing) {
+            prompt += `- 节奏：${this.getPacingLabel(guide.narrative.pacing)}\n`
+          }
+          prompt += '\n'
+        }
+
+        // 语言特点
+        if (guide.language) {
+          prompt += '## 语言特点\n'
+          if (guide.language.vocabulary_level) {
+            prompt += `- 词汇水平：${this.getVocabLevelLabel(guide.language.vocabulary_level)}\n`
+          }
+          if (guide.language.sentence_structure) {
+            prompt += `- 句式：${this.getSentenceStructureLabel(guide.language.sentence_structure)}\n`
+          }
+          if (guide.language.paragraph_length) {
+            prompt += `- 段落：${guide.language.paragraph_length === 'concise' ? '简洁' : guide.language.paragraph_length === 'descriptive' ? '详细' : '适中'}\n`
+          }
+          if (guide.language.dialogue_ratio !== undefined) {
+            prompt += `- 对话比例：${Math.round(guide.language.dialogue_ratio * 100)}%\n`
+          }
+          prompt += '\n'
+        }
+
+        // 格式化要求
+        if (guide.formatting) {
+          prompt += '## 格式化\n'
+          if (guide.formatting.chapter_structure) {
+            prompt += `- 章节结构：${guide.formatting.chapter_structure === 'conventional' ? '传统' : guide.formatting.chapter_structure === 'loose' ? '松散' : '碎片化'}\n`
+          }
+          if (guide.formatting.POV_switches !== undefined) {
+            prompt += `- 视角切换：${guide.formatting.POV_switches ? '允许' : '不允许'}\n`
+          }
+          if (guide.formatting.flashbacks) {
+            prompt += `- 倒叙使用：${this.getFlashbackLabel(guide.formatting.flashbacks)}\n`
+          }
+        }
+
+        return prompt.trim() || '请保持一致的叙事风格。'
+      } catch {
+        // 解析失败，返回默认
+      }
+    }
+
     return '请保持一致的叙事风格。'
-    // const guide = await this.getStyleGuide(projectId)
-    // if (!guide) {
-    //   return '请保持一致的叙事风格。'
-    // }
-    //
-    // let prompt = '# 写作风格指南\n\n'
-    //
-    // // 叙事风格
-    // prompt += '## 叙事风格\n'
-    // prompt += `- 视角：${this.getPerspectiveLabel(guide.narrative.perspective)}\n`
-    // prompt += `- 时态：${guide.narrative.tense === 'past' ? '过去时' : '现在时'}\n`
-    // prompt += `- 语气：${this.getToneLabel(guide.narrative.tone)}\n`
-    // prompt += `- 节奏：${this.getPacingLabel(guide.narrative.pacing)}\n`
-    // prompt += '\n'
-    //
-    // // 语言特点
-    // prompt += '## 语言特点\n'
-    // prompt += `- 词汇水平：${this.getVocabLevelLabel(guide.language.vocabulary_level)}\n`
-    // prompt += `- 句式：${this.getSentenceStructureLabel(guide.language.sentence_structure)}\n`
-    // prompt += `- 段落：${guide.language.paragraph_length === 'concise' ? '简洁' : guide.language.paragraph_length === 'descriptive' ? '详细' : '适中'}\n`
-    // prompt += `- 对话比例：${Math.round(guide.language.dialogue_ratio * 100)}%\n`
-    // prompt += '\n'
-    //
-    // // 格式化要求
-    // prompt += '## 格式化\n'
-    // prompt += `- 章节结构：${guide.formatting.chapter_structure === 'conventional' ? '传统' : guide.formatting.chapter_structure === 'loose' ? '松散' : '碎片化'}\n`
-    // prompt += `- 视角切换：${guide.formatting.POV_switches ? '允许' : '不允许'}\n`
-    // prompt += `- 倒叙使用：${this.getFlashbackLabel(guide.formatting.flashbacks)}\n`
-    //
-    // return prompt
   }
 
   // 4. 生成人物对话风格提示
@@ -424,27 +459,39 @@ export class WritingConsistencyService {
     const suggestions: string[] = []
 
     // 获取风格指南
-    // TODO: 暂时禁用风格指南检查
-    // const guide = await this.getStyleGuide(projectId)
-    // if (guide) {
-    //   // 检查句长
-    //   const avgSentenceLength = this.calculateAverageSentenceLength(newContent)
-    //   if (guide.language.sentence_structure === 'short' && avgSentenceLength > 20) {
-    //     violations.push('句子偏长，建议使用更多短句')
-    //     suggestions.push('尝试使用更多简短的句子来增强节奏感')
-    //   } else if (guide.language.sentence_structure === 'complex' && avgSentenceLength < 15) {
-    //     violations.push('句子偏短，建议使用更复杂的长句')
-    //   }
-    //
-    //   // 检查对话比例
-    //   const dialogueRatio = this.calculateDialogueRatio(newContent)
-    //   const targetRatio = guide.language.dialogue_ratio
-    //   if (Math.abs(dialogueRatio - targetRatio) > 0.2) {
-    //     violations.push(
-    //       `对话比例为${Math.round(dialogueRatio * 100)}%，与目标${Math.round(targetRatio * 100)}%差距较大`,
-    //     )
-    //   }
-    // }
+    const project = await this.prisma.project.findUnique({
+      where: { id: projectId },
+      select: { writingStyleConfig: true },
+    })
+
+    if (project?.writingStyleConfig) {
+      try {
+        const guide = JSON.parse(project.writingStyleConfig) as WritingStyleGuide
+        if (guide.language) {
+          // 检查句长
+          const avgSentenceLength = this.calculateAverageSentenceLength(newContent)
+          if (guide.language.sentence_structure === 'short' && avgSentenceLength > 20) {
+            violations.push('句子偏长，建议使用更多短句')
+            suggestions.push('尝试使用更多简短的句子来增强节奏感')
+          } else if (guide.language.sentence_structure === 'complex' && avgSentenceLength < 15) {
+            violations.push('句子偏短，建议使用更复杂的长句')
+          }
+
+          // 检查对话比例
+          if (guide.language.dialogue_ratio !== undefined) {
+            const dialogueRatio = this.calculateDialogueRatio(newContent)
+            const targetRatio = guide.language.dialogue_ratio
+            if (Math.abs(dialogueRatio - targetRatio) > 0.2) {
+              violations.push(
+                `对话比例为${Math.round(dialogueRatio * 100)}%，与目标${Math.round(targetRatio * 100)}%差距较大`,
+              )
+            }
+          }
+        }
+      } catch {
+        // 解析失败，跳过风格检查
+      }
+    }
 
     // 检查人物一致性
     if (previousContent) {
@@ -589,12 +636,22 @@ export class WritingConsistencyService {
     projectId: string,
     currentChapterId: string,
   ): Promise<string[]> {
-    // TODO: Plot模型中没有plotPoints关系，需要后续添加或修改逻辑
     const plots = await this.prisma.plot.findMany({
       where: { projectId },
+      include: {
+        plotPoints: {
+          orderBy: { order: 'asc' },
+        },
+      },
     })
 
     const unresolved: string[] = []
+    plots.forEach(plot => {
+      const unresolvedPoints = plot.plotPoints.filter(pp => !pp.description?.includes('已解决') && !pp.description?.includes('完成'))
+      unresolvedPoints.forEach(point => {
+        unresolved.push(`${plot.title}: ${point.title}`)
+      })
+    })
     return unresolved
   }
 

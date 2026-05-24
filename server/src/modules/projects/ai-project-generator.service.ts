@@ -175,4 +175,289 @@ export class AiProjectGeneratorService {
       throw new Error(`生成世界观设定失败：${error.message}`)
     }
   }
+
+  async expandCharacter(userId: string, projectId: string, characterId: string): Promise<any> {
+    const project = await this.prisma.project.findUnique({
+      where: { id: projectId },
+    })
+    const character = await this.prisma.character.findUnique({
+      where: { id: characterId },
+    })
+
+    if (!project) {
+      throw new Error('项目不存在')
+    }
+    if (!character) {
+      throw new Error('角色不存在')
+    }
+
+    const systemPrompt = `你是一个角色深度开发助手。根据已有角色信息，补充和完善角色细节。
+
+项目信息：
+- 标题：${project.title}
+- 类型：${project.genre}
+
+已有角色信息：
+- 姓名：${character.name}
+- 角色定位：${character.role || ''}
+- 外貌：${character.appearance || ''}
+- 性格：${character.personality || ''}
+- 背景：${character.background || ''}
+- 目标：${character.goals || ''}
+
+返回 JSON 格式，包含要更新的字段：
+{
+  "appearance": "更详细的外貌描述",
+  "personality": "更详细的性格描述",
+  "background": "更详细的背景故事",
+  "goals": "更清晰的目标",
+  "flaws": "角色缺陷",
+  "arc": "角色发展弧线",
+  "voice": "角色说话风格"
+}
+
+只返回 JSON，不要有其他文字。`
+
+    const result = await this.aiService.chat(userId, {
+      projectId,
+      message: systemPrompt,
+      temperature: 0.7,
+    })
+
+    try {
+      const jsonMatch = result.response.match(/\{[\s\S]*\}/)
+      if (jsonMatch) {
+        const updateData = JSON.parse(jsonMatch[0])
+        return await this.prisma.character.update({
+          where: { id: characterId },
+          data: updateData,
+        })
+      }
+      throw new Error('无法解析 AI 生成的内容')
+    } catch (error) {
+      throw new Error(`扩展角色失败：${error.message}`)
+    }
+  }
+
+  async expandWorldSetting(userId: string, projectId: string, settingId: string): Promise<any> {
+    const project = await this.prisma.project.findUnique({
+      where: { id: projectId },
+    })
+    const setting = await this.prisma.worldSetting.findUnique({
+      where: { id: settingId },
+      include: { items: true },
+    })
+
+    if (!project) {
+      throw new Error('项目不存在')
+    }
+    if (!setting) {
+      throw new Error('设定不存在')
+    }
+
+    const systemPrompt = `你是一个世界观设定深度开发助手。根据已有设定信息，补充和完善设定细节。
+
+项目信息：
+- 标题：${project.title}
+- 类型：${project.genre}
+
+已有设定信息：
+- 分类：${setting.category}
+- 名称：${setting.name}
+- 描述：${setting.description || ''}
+
+返回 JSON 格式，包含详细子项：
+{
+  "description": "更详细的描述",
+  "items": [
+    {
+      "name": "子项名称1",
+      "description": "子项详细描述"
+    },
+    {
+      "name": "子项名称2",
+      "description": "子项详细描述"
+    }
+  ]
+}
+
+只返回 JSON，不要有其他文字。`
+
+    const result = await this.aiService.chat(userId, {
+      projectId,
+      message: systemPrompt,
+      temperature: 0.7,
+    })
+
+    try {
+      const jsonMatch = result.response.match(/\{[\s\S]*\}/)
+      if (jsonMatch) {
+        const updateData = JSON.parse(jsonMatch[0])
+
+        // 更新主设定描述
+        const updatedSetting = await this.prisma.worldSetting.update({
+          where: { id: settingId },
+          data: {
+            description: updateData.description,
+          },
+        })
+
+        // 创建子项
+        if (updateData.items && Array.isArray(updateData.items)) {
+          for (const item of updateData.items) {
+            await this.prisma.worldSettingItem.create({
+              data: {
+                ...item,
+                settingId,
+              },
+            })
+          }
+        }
+
+        return await this.prisma.worldSetting.findUnique({
+          where: { id: settingId },
+          include: { items: true },
+        })
+      }
+      throw new Error('无法解析 AI 生成的内容')
+    } catch (error) {
+      throw new Error(`扩展设定失败：${error.message}`)
+    }
+  }
+
+  async generateProjectSuggestions(userId: string, projectId: string): Promise<any> {
+    const project = await this.prisma.project.findUnique({
+      where: { id: projectId },
+      include: {
+        characters: true,
+        worldSettings: true,
+        chapters: {
+          include: { contents: true },
+          orderBy: { updatedAt: 'desc' },
+          take: 3,
+        },
+      },
+    })
+
+    if (!project) {
+      throw new Error('项目不存在')
+    }
+
+    const charactersSummary = project.characters.length > 0
+      ? project.characters.map(c => `- ${c.name}: ${c.role || ''}`).join('\n')
+      : '暂无角色'
+
+    const settingsSummary = project.worldSettings.length > 0
+      ? project.worldSettings.map(s => `- ${s.category} - ${s.name}`).join('\n')
+      : '暂无设定'
+
+    const chaptersSummary = project.chapters.length > 0
+      ? project.chapters.map(c => `- ${c.title} (${c.wordCount || 0}字)`).join('\n')
+      : '暂无章节'
+
+    const systemPrompt = `你是一个小说创作顾问。根据项目信息，给出创作建议。
+
+项目信息：
+- 标题：${project.title}
+- 类型：${project.genre}
+- 大纲：${project.synopsis}
+- 字数：${project.wordCount || 0}
+
+现有角色：
+${charactersSummary}
+
+现有设定：
+${settingsSummary}
+
+最近章节：
+${chaptersSummary}
+
+返回 JSON 格式的建议：
+{
+  "nextSteps": ["下一步建议1", "下一步建议2", "下一步建议3"],
+  "contentSuggestions": ["内容建议1", "内容建议2"],
+  "characterSuggestions": ["角色相关建议1", "角色相关建议2"],
+  "worldSuggestions": ["世界观相关建议1", "世界观相关建议2"],
+  "plotSuggestions": ["剧情发展建议1", "剧情发展建议2"]
+}
+
+要求：
+1. 建议要具体、可操作
+2. 根据项目实际情况给出建议
+3. 要有优先级顺序
+
+只返回 JSON，不要有其他文字。`
+
+    const result = await this.aiService.chat(userId, {
+      projectId,
+      message: systemPrompt,
+      temperature: 0.7,
+    })
+
+    try {
+      const jsonMatch = result.response.match(/\{[\s\S]*\}/)
+      if (jsonMatch) {
+        return JSON.parse(jsonMatch[0])
+      }
+      throw new Error('无法解析 AI 生成的内容')
+    } catch (error) {
+      throw new Error(`生成建议失败：${error.message}`)
+    }
+  }
+
+  async generateChapterOutline(userId: string, projectId: string, chapterId?: string, content?: string): Promise<any> {
+    const project = await this.prisma.project.findUnique({
+      where: { id: projectId },
+    })
+
+    if (!project) {
+      throw new Error('项目不存在')
+    }
+
+    const systemPrompt = `你是一个章节大纲生成助手。把文本内容分解成详细的大纲结构。
+
+项目信息：
+- 标题：${project.title}
+- 类型：${project.genre}
+
+${content ? `需要生成大纲的文本内容：\n${content}` : ''}
+
+返回 JSON 格式的大纲：
+{
+  "title": "章节标题",
+  "summary": "章节摘要",
+  "scenes": [
+    {
+      "title": "场景标题",
+      "location": "地点",
+      "characters": ["角色1", "角色2"],
+      "content": "场景内容描述",
+      "purpose": "场景作用"
+    }
+  ]
+}
+
+要求：
+1. 大纲要清晰、有逻辑
+2. 每个场景要有明确的作用
+3. 场景之间要有连贯的发展
+
+只返回 JSON，不要有其他文字。`
+
+    const result = await this.aiService.chat(userId, {
+      projectId,
+      message: systemPrompt,
+      temperature: 0.7,
+    })
+
+    try {
+      const jsonMatch = result.response.match(/\{[\s\S]*\}/)
+      if (jsonMatch) {
+        return JSON.parse(jsonMatch[0])
+      }
+      throw new Error('无法解析 AI 生成的内容')
+    } catch (error) {
+      throw new Error(`生成大纲失败：${error.message}`)
+    }
+  }
 }

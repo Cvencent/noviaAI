@@ -6,6 +6,7 @@ export interface Chapter {
   status: string
   wordCount: number
   summary?: string
+  webNovelTemplateId?: string | null
   createdAt: string
   updatedAt: string
   contents?: ChapterContent[]
@@ -35,6 +36,7 @@ export interface CreateChapterDto {
   status?: string
   wordCount?: number
   summary?: string
+  webNovelTemplateId?: string | null
 }
 
 export interface UpdateChapterDto {
@@ -43,6 +45,7 @@ export interface UpdateChapterDto {
   status?: string
   wordCount?: number
   summary?: string
+  webNovelTemplateId?: string | null
 }
 
 export interface AddContentDto {

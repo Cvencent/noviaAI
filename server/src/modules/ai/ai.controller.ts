@@ -84,4 +84,24 @@ export class AiController {
       res.end()
     }
   }
+
+  @Post('chat-stream')
+  async chatStream(@CurrentUser() user: any, @Body() dto: ChatDto, @Res() res: Response) {
+    res.setHeader('Content-Type', 'text/event-stream; charset=utf-8')
+    res.setHeader('Cache-Control', 'no-cache, no-transform')
+    res.setHeader('Connection', 'keep-alive')
+    res.flushHeaders?.()
+
+    try {
+      for await (const token of this.aiService.chatStream(user.id, dto)) {
+        res.write(`data: ${JSON.stringify({ token })}\n\n`)
+      }
+      res.write('data: [DONE]\n\n')
+    } catch (error: any) {
+      res.write(`data: ${JSON.stringify({ error: error.message || 'AI 聊天失败' })}\n\n`)
+      res.write('data: [DONE]\n\n')
+    } finally {
+      res.end()
+    }
+  }
 }

@@ -23,7 +23,9 @@ import {
   RepairPlan,
   ReviewIssue,
   ReviewReport,
+  StoryAiJob,
   StoryAgentRun,
+  StoryRepairResult,
   StoryContextPack,
   StoryEntity,
   StoryPreflightResult,
@@ -31,6 +33,7 @@ import {
   WorldStateFact,
   storySystemApi,
 } from '../api/story-system'
+import { getWebNovelTemplate } from '@/types/web-novel-templates'
 
 type StoryPanelTab = 'overview' | 'context' | 'agent' | 'repair' | 'commits' | 'memory' | 'publish'
 
@@ -38,6 +41,8 @@ interface StorySystemPanelProps {
   projectId: string
   chapterId: string
   content: string
+  projectTemplateId?: string | null
+  chapterTemplateId?: string | null
   onHighlightIssues?: (issues: ReviewIssue[]) => void
   onApplyRepair?: (text: string) => void
   onClose: () => void
@@ -70,10 +75,21 @@ function plainText(value: string) {
   return value.replace(/<[^>]*>/g, '').replace(/\s+/g, ' ').trim()
 }
 
+function parseJobResult<T>(job?: StoryAiJob | null): T | null {
+  if (!job?.result) return null
+  try {
+    return JSON.parse(job.result) as T
+  } catch {
+    return null
+  }
+}
+
 export function StorySystemPanel({
   projectId,
   chapterId,
   content,
+  projectTemplateId,
+  chapterTemplateId,
   onHighlightIssues,
   onApplyRepair,
   onClose,
@@ -90,6 +106,7 @@ export function StorySystemPanel({
   const [publishChecklist, setPublishChecklist] = useState<PublishChecklist | null>(null)
   const [fullBookAiReview, setFullBookAiReview] = useState<FullBookAiReview | null>(null)
   const [projectionJobs, setProjectionJobs] = useState<ProjectionJob[]>([])
+  const [aiJobs, setAiJobs] = useState<StoryAiJob[]>([])
   const [activeTab, setActiveTab] = useState<StoryPanelTab>('overview')
   const [run, setRun] = useState<StoryAgentRun | null>(null)
   const [instruction, setInstruction] = useState('')
@@ -107,6 +124,10 @@ export function StorySystemPanel({
   const latestAcceptedText = latestAcceptedCommit ? plainText(latestAcceptedCommit.contentSnapshot) : ''
   const currentText = plainText(content)
   const hasCommitDiff = Boolean(latestAcceptedText && currentText && latestAcceptedText !== currentText)
+  const activeTemplate = getWebNovelTemplate(chapterTemplateId || projectTemplateId || '')
+  const activeRepairJob = aiJobs.find((job) => job.type === 'REPAIR_CHAPTER' && ['PENDING', 'RUNNING'].includes(job.status))
+  const latestRepairJob = aiJobs.find((job) => job.type === 'REPAIR_CHAPTER')
+  const repairJobResult = parseJobResult<StoryRepairResult>(latestRepairJob)
   const runDraft = useMemo(() => {
     const draft = run?.steps?.find((step) => step.stepType === 'DRAFT')
     const payload = parseJson(draft?.output)
@@ -117,8 +138,16 @@ export function StorySystemPanel({
     loadStatus()
   }, [projectId, chapterId])
 
+  useEffect(() => {
+    if (!activeRepairJob) return
+    const timer = window.setInterval(() => {
+      loadStatus().catch(() => undefined)
+    }, 2500)
+    return () => window.clearInterval(timer)
+  }, [activeRepairJob?.id])
+
   const loadStatus = async () => {
-    const [healthData, commitData, reportData, repairData, loopData, factData, entityData, checklistData, projectionJobData] = await Promise.all([
+    const [healthData, commitData, reportData, repairData, loopData, factData, entityData, checklistData, projectionJobData, aiJobData] = await Promise.all([
       storySystemApi.health(projectId, chapterId).catch(() => null),
       storySystemApi.listCommits(projectId, chapterId).catch(() => []),
       storySystemApi.listReviewReports(projectId, chapterId).catch(() => []),
@@ -128,6 +157,7 @@ export function StorySystemPanel({
       storySystemApi.listGraphEntities(projectId).catch(() => []),
       storySystemApi.getPublishChecklist(projectId).catch(() => null),
       storySystemApi.listProjectionJobs(projectId).catch(() => []),
+      storySystemApi.listAiJobs(projectId, chapterId).catch(() => []),
     ])
     setHealth(healthData)
     setCommits(commitData)
@@ -138,6 +168,13 @@ export function StorySystemPanel({
     setGraphEntities(entityData)
     setPublishChecklist(checklistData)
     setProjectionJobs(projectionJobData)
+    setAiJobs(aiJobData)
+    const latestRepair = aiJobData.find((job) => job.type === 'REPAIR_CHAPTER')
+    const result = parseJobResult<StoryRepairResult>(latestRepair)
+    if (latestRepair?.status === 'DONE' && result?.repairedText) {
+      setRepairPreview(result.repairedText)
+      setActiveRepairPlanId(result.repairPlanId)
+    }
   }
 
   const runAction = async (label: string, action: () => Promise<void>) => {
@@ -221,13 +258,14 @@ export function StorySystemPanel({
   })
 
   const repairCurrent = (repairPlanId: string) => runAction('修复候选', async () => {
-    const result = await storySystemApi.repairChapter(projectId, chapterId, {
+    const job = await storySystemApi.createAiJob(projectId, chapterId, {
+      type: 'REPAIR_CHAPTER',
       content,
       repairPlanId,
       instruction: instruction.trim() || undefined,
     })
-    setRepairPreview(result.repairedText)
-    setActiveRepairPlanId(result.repairPlanId)
+    setAiJobs((current) => [job, ...current.filter((item) => item.id !== job.id)])
+    setMessage('修复候选任务已开始，离开页面也会继续生成')
     await loadStatus()
   })
 
@@ -363,6 +401,15 @@ export function StorySystemPanel({
 
         {activeTab === 'overview' && <section className="space-y-2">
           <div className="text-sm font-medium text-gray-900">写作主链</div>
+          {activeTemplate && (
+            <div className="rounded-lg border border-indigo-100 bg-indigo-50 p-3 text-xs text-indigo-950">
+              <div className="font-medium">当前模板 · {activeTemplate.name}</div>
+              <div className="mt-1 leading-5">{activeTemplate.description}</div>
+              <div className="mt-1 text-indigo-800">
+                {activeTemplate.chapterGoals.slice(0, 2).join(' · ')}
+              </div>
+            </div>
+          )}
           <div className="grid grid-cols-2 gap-2">
             <Button variant="outline" size="sm" onClick={refreshContracts} isLoading={isBusy}>
               <RefreshCw className="w-4 h-4 mr-2" />
@@ -397,6 +444,13 @@ export function StorySystemPanel({
             <div className="text-sm font-medium text-gray-900">
               ContextPack · {contextPack.totalTokenEstimate} tokens
             </div>
+            {contextPack.template && (
+              <div className="rounded-lg border border-gray-200 p-3 text-xs text-gray-700">
+                <div className="font-medium text-gray-900">模板注入</div>
+                <div className="mt-1">{contextPack.template.name}</div>
+                <div className="mt-1 text-gray-500">{contextPack.template.description}</div>
+              </div>
+            )}
             {contextPack.warnings.length > 0 && (
               <div className="rounded border border-yellow-100 bg-yellow-50 p-2 text-xs text-yellow-800">
                 {contextPack.warnings.map((warning) => (
@@ -470,6 +524,30 @@ export function StorySystemPanel({
         {activeTab === 'repair' && (repairPlans.length > 0 || reviewReports.length > 0) && (
           <section className="space-y-2">
             <div className="text-sm font-medium text-gray-900">审查与修复</div>
+            {latestRepairJob && (
+              <div className="rounded-lg border border-gray-200 bg-white p-3 text-xs text-gray-700">
+                <div className="font-medium text-gray-900">
+                  修复候选任务 · {statusLabel(latestRepairJob.status)}
+                </div>
+                {latestRepairJob.status === 'FAILED' && latestRepairJob.error && (
+                  <div className="mt-1 text-red-700">{latestRepairJob.error}</div>
+                )}
+                {activeRepairJob && <div className="mt-1 text-indigo-700">后台生成中，可以切换页面后再回来查看。</div>}
+                {latestRepairJob.status === 'DONE' && repairJobResult?.repairedText && !repairPreview && (
+                  <Button
+                    className="mt-2"
+                    variant="outline"
+                    size="sm"
+                    onClick={() => {
+                      setRepairPreview(repairJobResult.repairedText)
+                      setActiveRepairPlanId(repairJobResult.repairPlanId)
+                    }}
+                  >
+                    查看候选文本
+                  </Button>
+                )}
+              </div>
+            )}
             {repairPlans.slice(0, 3).map((plan) => {
               const steps = parseJson(plan.steps) || []
               const isOpen = plan.status === 'OPEN'

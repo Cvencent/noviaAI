@@ -150,12 +150,10 @@ export class IntelligentCharacterContextService {
       characterContexts,
     )
 
-    // TODO: 修复knowledgeGaps的类型问题
-    // const knowledgeGaps = this.detectKnowledgeGaps(
-    //   currentContent,
-    //   characterContexts,
-    // )
-    const knowledgeGaps: any[] = []
+    const knowledgeGaps = this.detectKnowledgeGaps(
+      currentContent,
+      characterContexts,
+    )
 
     const finalContext = this.buildFinalContext(
       sortedCharacters,
@@ -244,8 +242,8 @@ export class IntelligentCharacterContextService {
   private detectKnowledgeGaps(
     text: string,
     characters: any[],
-  ): { type: string; description: string; suggestion: string }[] {
-    const gaps: { type: string; description: string; suggestion: string }[] = []
+  ): { type: 'missing_relation' | 'unknown_character' | 'contradiction'; description: string; suggestion: string }[] {
+    const gaps: { type: 'missing_relation' | 'unknown_character' | 'contradiction'; description: string; suggestion: string }[] = []
 
     const mentionedNames = this.detectCharacterMentions(text)
     for (const name of mentionedNames) {

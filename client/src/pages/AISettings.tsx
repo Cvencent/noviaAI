@@ -1,14 +1,16 @@
 import React, { useState, useEffect } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useNavigate } from 'react-router-dom';
-import { Save, RotateCcw, Sparkles, Check, Plus, Trash2, Key, ArrowLeft, MessageSquare } from 'lucide-react';
+import { Save, RotateCcw, Sparkles, Plus, Trash2, Key, ArrowLeft, MessageSquare } from 'lucide-react';
 import { Button } from '@/components/ui/Button';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/Card';
 import { Select } from '@/components/ui/Select';
 import { Input } from '@/components/ui/Input';
 import { Modal } from '@/components/ui/Modal';
+import { LoadingSpinner } from '@/components/ui/LoadingSpinner';
 import { aiConfigApi } from '@/api/ai-config';
 import { apiKeysApi } from '@/api/api-keys';
+import { useToast } from '@/contexts/ToastContext';
 import {
   AIAction,
   AIProvider,
@@ -27,6 +29,7 @@ export const AISettingsPage = () => {
   const [hasChanges, setHasChanges] = useState(false);
   const [isKeyModalOpen, setIsKeyModalOpen] = useState(false);
   const [newKey, setNewKey] = useState({ name: '', provider: '', apiKey: '', baseUrl: '' });
+  const { success, error } = useToast();
 
   const [modificationConfig, setModificationConfig] = useState<ModificationConfig>(() => {
     const saved = localStorage.getItem('modificationConfig');
@@ -63,7 +66,12 @@ export const AISettingsPage = () => {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['ai-configs'] });
       setHasChanges(false);
+      success('AI 配置已保存');
     },
+    onError: (err) => {
+      error('保存配置失败');
+      console.error('保存配置失败:', err);
+    }
   });
 
   const createKeyMutation = useMutation({
@@ -72,14 +80,24 @@ export const AISettingsPage = () => {
       queryClient.invalidateQueries({ queryKey: ['api-keys'] });
       setIsKeyModalOpen(false);
       setNewKey({ name: '', provider: '', apiKey: '', baseUrl: '' });
+      success('API 密钥已添加');
     },
+    onError: (err) => {
+      error('添加 API 密钥失败');
+      console.error('添加 API 密钥失败:', err);
+    }
   });
 
   const deleteKeyMutation = useMutation({
     mutationFn: apiKeysApi.delete,
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['api-keys'] });
+      success('API 密钥已删除');
     },
+    onError: (err) => {
+      error('删除 API 密钥失败');
+      console.error('删除 API 密钥失败:', err);
+    }
   });
 
   const handleConfigChange = (
@@ -146,7 +164,7 @@ export const AISettingsPage = () => {
   if (configsLoading || keysLoading) {
     return (
       <div className="p-8 flex items-center justify-center h-64">
-        <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-indigo-600"></div>
+        <LoadingSpinner />
       </div>
     );
   }
@@ -455,13 +473,6 @@ export const AISettingsPage = () => {
               保存
             </Button>
           </div>
-        </div>
-      )}
-
-      {updateMutation.isSuccess && (
-        <div className="fixed bottom-8 right-8 bg-green-500 text-white rounded-xl shadow-2xl p-4 flex items-center gap-2">
-          <Check className="w-5 h-5" />
-          配置已保存
         </div>
       )}
 

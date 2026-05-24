@@ -5,6 +5,8 @@ import type {
 } from '../types/project'
 import { apiClient } from './client'
 
+export type { Project, CreateProjectDto, UpdateProjectDto }
+
 export const projectsApi = {
   async getAll(): Promise<Project[]> {
     const response = await apiClient.get('/projects')
@@ -33,6 +35,26 @@ export const projectsApi = {
 
   async aiGenerateWorldSettings(id: string, count?: number): Promise<any[]> {
     const response = await apiClient.post(`/projects/${id}/ai-generate-world-settings`, { count })
+    return response.data
+  },
+
+  async aiExpandCharacter(id: string, characterId: string): Promise<any> {
+    const response = await apiClient.post(`/projects/${id}/ai-expand-character/${characterId}`)
+    return response.data
+  },
+
+  async aiExpandWorldSetting(id: string, settingId: string): Promise<any> {
+    const response = await apiClient.post(`/projects/${id}/ai-expand-world-setting/${settingId}`)
+    return response.data
+  },
+
+  async aiGetSuggestions(id: string): Promise<any> {
+    const response = await apiClient.get(`/projects/${id}/ai-suggestions`)
+    return response.data
+  },
+
+  async aiGenerateChapterOutline(id: string, chapterId?: string, content?: string): Promise<any> {
+    const response = await apiClient.post(`/projects/${id}/ai-chapter-outline`, { chapterId, content })
     return response.data
   },
 

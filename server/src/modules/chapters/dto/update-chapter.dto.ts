@@ -22,4 +22,8 @@ export class UpdateChapterDto {
   @IsString()
   @IsOptional()
   summary?: string
+
+  @IsString()
+  @IsOptional()
+  webNovelTemplateId?: string
 }

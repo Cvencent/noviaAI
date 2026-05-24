@@ -6,6 +6,7 @@ import {
   ContinueStoryAgentRunDto,
   CreateChapterCommitDto,
   CreateProjectionJobDto,
+  CreateStoryAiJobDto,
   DismissRepairPlanDto,
   ExportBookDto,
   FullBookAiReviewDto,
@@ -84,6 +85,25 @@ export class StorySystemController {
     @Body() dto: RepairChapterDto,
   ) {
     return this.storySystemService.repairChapter(user.id, projectId, chapterId, dto)
+  }
+
+  @Post('chapters/:chapterId/story-system/ai-jobs')
+  createAiJob(
+    @CurrentUser() user: any,
+    @Param('projectId') projectId: string,
+    @Param('chapterId') chapterId: string,
+    @Body() dto: CreateStoryAiJobDto,
+  ) {
+    return this.storySystemService.createStoryAiJob(user.id, projectId, chapterId, dto)
+  }
+
+  @Get('chapters/:chapterId/story-system/ai-jobs')
+  listAiJobs(
+    @CurrentUser() user: any,
+    @Param('projectId') projectId: string,
+    @Param('chapterId') chapterId: string,
+  ) {
+    return this.storySystemService.listStoryAiJobs(user.id, projectId, chapterId)
   }
 
   @Post('chapters/:chapterId/story-system/commits')

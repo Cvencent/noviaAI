@@ -1,10 +1,13 @@
-import { Injectable } from '@nestjs/common'
+import { Injectable, InternalServerErrorException } from '@nestjs/common'
 import { PrismaService } from '../../prisma/prisma.service'
 import { OpenaiProvider } from '../ai/providers/openai.provider'
 import { ClaudeProvider } from '../ai/providers/claude.provider'
+import { MimoProvider } from '../ai/providers/mimo.provider'
+import { DeepseekProvider } from '../ai/providers/deepseek.provider'
+import { ApiKeysService } from '../api-keys/api-keys.service'
 
 export interface EnhancedWritingOptions {
-  provider?: 'openai' | 'claude'
+  provider?: 'openai' | 'claude' | 'mimo' | 'deepseek'
   model?: string
   temperature?: number
 }
@@ -29,7 +32,10 @@ export class EnhancedWritingService {
   constructor(
     private prisma: PrismaService,
     private openaiProvider: OpenaiProvider,
-    private claudeProvider: ClaudeProvider
+    private claudeProvider: ClaudeProvider,
+    private mimoProvider: MimoProvider,
+    private deepseekProvider: DeepseekProvider,
+    private apiKeysService: ApiKeysService
   ) {}
 
   /**
@@ -45,9 +51,10 @@ export class EnhancedWritingService {
     rewritten: string
     explanation: string
   }> {
-    const provider = this.getProvider(options?.provider || 'claude')
-    const model = options?.model || this.getDefaultModel(options?.provider || 'claude')
-    
+    const providerName = options?.provider || 'mimo'
+    const provider = await this.configureProvider(providerName, userId)
+    const model = options?.model || this.getDefaultModel(providerName)
+
     // 构建提示词
     const systemPrompt = `你是一位专业的写作教练，擅长"Show, Don't Tell（展示而非告知）的写作技巧。
 
@@ -101,12 +108,13 @@ ${text}
       enhanced: string
       suggestions: string[]
     }> {
-    const provider = this.getProvider(options?.provider || 'claude')
-    const model = options?.model || this.getDefaultModel(options?.provider || 'claude')
-    
+    const providerName = options?.provider || 'mimo'
+    const provider = await this.configureProvider(providerName, userId)
+    const model = options?.model || this.getDefaultModel(providerName)
+
     const focus = options?.focus || 'sensory'
     const detailLevel = options?.detailLevel || 'medium'
-    
+
     const focusDescription = {
       visual: '视觉细节、色彩、光影、动作',
       sensory: '视觉、听觉、嗅觉、味觉、触觉的五感描写',
@@ -172,9 +180,10 @@ ${text}
         content: string
       }>
     }> {
-    const provider = this.getProvider(options?.provider || 'claude')
-    const model = options?.model || this.getDefaultModel(options?.provider || 'claude')
-    
+    const providerName = options?.provider || 'mimo'
+    const provider = await this.configureProvider(providerName, userId)
+    const model = options?.model || this.getDefaultModel(providerName)
+
     const styleDescriptions = {
       vivid: '生动形象，画面感强',
       literary: '文学性强，语言优美',
@@ -230,9 +239,10 @@ ${text}
         potential: string
       }>
     }> {
-    const provider = this.getProvider(options?.provider || 'claude')
-    const model = options?.model || this.getDefaultModel(options?.provider || 'claude')
-    
+    const providerName = options?.provider || 'mimo'
+    const provider = await this.configureProvider(providerName, userId)
+    const model = options?.model || this.getDefaultModel(providerName)
+
     const type = options?.type || 'plot'
     const count = options?.count || 5
 
@@ -291,9 +301,10 @@ ${prompt}
       dialogue: string
       suggestions: string[]
     }> {
-    const provider = this.getProvider(options?.provider || 'claude')
-    const model = options?.model || this.getDefaultModel(options?.provider || 'claude')
-    
+    const providerName = options?.provider || 'mimo'
+    const provider = await this.configureProvider(providerName, userId)
+    const model = options?.model || this.getDefaultModel(providerName)
+
     const systemPrompt = `你是一位对话写作专家。你擅长写自然、符合人物性格、推动情节的对话。`
 
     const userPrompt = `请根据以下上下文，写一段对话。
@@ -328,11 +339,47 @@ ${context}
   }
 
   private getProvider(provider: string) {
-    return provider === 'openai' ? this.openaiProvider : this.claudeProvider
+    switch (provider) {
+      case 'openai':
+        return this.openaiProvider
+      case 'mimo':
+        return this.mimoProvider
+      case 'deepseek':
+        return this.deepseekProvider
+      case 'claude':
+      default:
+        return this.claudeProvider
+    }
   }
 
   private getDefaultModel(provider: string): string {
-    return provider === 'openai' ? 'gpt-4' : 'claude-3-sonnet-20240229'
+    switch (provider) {
+      case 'openai':
+        return 'gpt-4'
+      case 'mimo':
+        return 'mimo-v2.5-pro'
+      case 'deepseek':
+        return 'deepseek-chat'
+      case 'claude':
+      default:
+        return 'claude-3-sonnet-20240229'
+    }
+  }
+
+  private async configureProvider(providerName: string, userId: string) {
+    const provider = this.getProvider(providerName)
+    const keyData = await this.apiKeysService.getActiveKey(userId, providerName as 'openai' | 'claude' | 'deepseek' | 'mimo')
+
+    if (!keyData) {
+      throw new InternalServerErrorException(`未配置 ${providerName} API Key`)
+    }
+
+    provider.setApiKey(keyData.apiKey)
+    if (keyData.baseUrl) {
+      provider.setBaseUrl(keyData.baseUrl)
+    }
+
+    return provider
   }
 
   private parseShowDontTellResult(text: string): { rewritten: string; explanation: string } {

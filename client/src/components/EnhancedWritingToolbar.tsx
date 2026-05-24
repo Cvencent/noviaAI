@@ -71,7 +71,7 @@ export function EnhancedWritingToolbar({ selectedText, onInsertText }: EnhancedW
     if (!selectedText) return
     setIsLoading(true)
     try {
-      const result = await enhancedWritingApi.showDontTell(selectedText)
+      const result = await enhancedWritingApi.showDontTell(selectedText, { provider: 'mimo' })
       setResult(result)
       setShowResult(true)
     } catch (error) {
@@ -87,6 +87,7 @@ export function EnhancedWritingToolbar({ selectedText, onInsertText }: EnhancedW
     setIsLoading(true)
     try {
       const result = await enhancedWritingApi.enhanceDescription(selectedText, {
+        provider: 'mimo',
         focus: focus as any,
         detailLevel: detailLevel as any,
       })
@@ -105,6 +106,7 @@ export function EnhancedWritingToolbar({ selectedText, onInsertText }: EnhancedW
     setIsLoading(true)
     try {
       const result = await enhancedWritingApi.rewrite(selectedText, {
+        provider: 'mimo',
         style: style as any,
       })
       setResult(result)
@@ -121,6 +123,7 @@ export function EnhancedWritingToolbar({ selectedText, onInsertText }: EnhancedW
     setIsLoading(true)
     try {
       const result = await enhancedWritingApi.brainstorm(prompt, {
+        provider: 'mimo',
         type: type as any,
         count,
       })
@@ -139,7 +142,8 @@ export function EnhancedWritingToolbar({ selectedText, onInsertText }: EnhancedW
     try {
       const result = await enhancedWritingApi.generateDialogue(
         context || selectedText,
-        characterNames.split(',').map(n => n.trim()).filter(n => n)
+        characterNames.split(',').map(n => n.trim()).filter(n => n),
+        { provider: 'mimo' }
       )
       setResult(result)
       setShowResult(true)

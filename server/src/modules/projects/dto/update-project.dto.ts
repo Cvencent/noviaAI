@@ -29,4 +29,12 @@ export class UpdateProjectDto {
   @Min(0)
   @IsOptional()
   wordCount?: number
+
+  @IsString()
+  @IsOptional()
+  webNovelTemplateId?: string
+
+  @IsString()
+  @IsOptional()
+  chapterTemplateId?: string
 }

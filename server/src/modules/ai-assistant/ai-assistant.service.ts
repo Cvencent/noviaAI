@@ -207,7 +207,7 @@ ${hasChapterContext ? `对于 modify_chapter（当用户要求修改、改写、
   ): Promise<AssistantAction> {
     try {
       // 查找角色
-      const characters = await this.charactersService.findAll(projectId)
+      const characters = await this.charactersService.findAllWithoutPagination(projectId)
       const fromChar = characters.find(c => c.name === data.fromCharacter)
       const toChar = characters.find(c => c.name === data.toCharacter)
 

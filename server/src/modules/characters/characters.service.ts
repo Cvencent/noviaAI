@@ -7,6 +7,19 @@ import {
 import { PrismaService } from '../../prisma/prisma.service'
 import { CreateCharacterDto, UpdateCharacterDto } from './dto'
 
+interface PaginationOptions {
+  page?: number
+  limit?: number
+}
+
+interface PaginatedResult<T> {
+  data: T[]
+  total: number
+  page: number
+  limit: number
+  totalPages: number
+}
+
 @Injectable()
 export class CharactersService {
   constructor(private prisma: PrismaService) {}
@@ -30,7 +43,65 @@ export class CharactersService {
     return character
   }
 
-  async findAll(projectId: string) {
+  async findAll(projectId: string, pagination?: PaginationOptions) {
+    const project = await this.prisma.project.findUnique({
+      where: { id: projectId },
+    })
+
+    if (!project) {
+      throw new NotFoundException('项目不存在')
+    }
+
+    const page = pagination?.page || 1
+    const limit = pagination?.limit || 50
+    const skip = (page - 1) * limit
+
+    const [characters, total] = await Promise.all([
+      this.prisma.character.findMany({
+        where: { projectId },
+        include: {
+          relationshipsFrom: {
+            include: {
+              toCharacter: {
+                select: {
+                  id: true,
+                  name: true,
+                },
+              },
+            },
+          },
+          relationshipsTo: {
+            include: {
+              fromCharacter: {
+                select: {
+                  id: true,
+                  name: true,
+                },
+              },
+            },
+          },
+        },
+        skip,
+        take: limit,
+        orderBy: { createdAt: 'desc' },
+      }),
+      this.prisma.character.count({
+        where: { projectId },
+      }),
+    ])
+
+    const totalPages = Math.ceil(total / limit)
+
+    return {
+      data: characters,
+      total,
+      page,
+      limit,
+      totalPages,
+    } as PaginatedResult<typeof characters[0]>
+  }
+
+  async findAllWithoutPagination(projectId: string) {
     const project = await this.prisma.project.findUnique({
       where: { id: projectId },
     })
@@ -63,6 +134,7 @@ export class CharactersService {
           },
         },
       },
+      orderBy: { createdAt: 'desc' },
     })
 
     return characters
@@ -149,6 +221,33 @@ export class CharactersService {
     })
 
     return { message: '人物已删除' }
+  }
+
+  async bulkCreate(projectId: string, characters: CreateCharacterDto[]) {
+    if (!characters || characters.length === 0) {
+      throw new BadRequestException('人物列表不能为空')
+    }
+
+    const project = await this.prisma.project.findUnique({
+      where: { id: projectId },
+    })
+
+    if (!project) {
+      throw new NotFoundException('项目不存在')
+    }
+
+    const createdCharacters = await Promise.all(
+      characters.map((char) =>
+        this.prisma.character.create({
+          data: {
+            ...char,
+            projectId,
+          },
+        }),
+      ),
+    )
+
+    return createdCharacters
   }
 
   async createRelationship(

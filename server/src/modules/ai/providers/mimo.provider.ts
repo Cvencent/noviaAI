@@ -34,7 +34,7 @@ export class MimoProvider {
       })
 
       const response = await client.post('/chat/completions', {
-        model: options.model || 'xiaomi/mimo-v2.5-pro',
+        model: options.model || 'mimo-v2.5-pro',
         messages: options.messages,
         temperature: options.temperature ?? 0.7,
         max_tokens: options.maxTokens,
@@ -68,7 +68,7 @@ export class MimoProvider {
       })
 
       const response = await client.post('/chat/completions', {
-        model: options.model || 'xiaomi/mimo-v2.5-pro',
+        model: options.model || 'mimo-v2.5-pro',
         messages: options.messages,
         temperature: options.temperature ?? 0.7,
         max_tokens: options.maxTokens,

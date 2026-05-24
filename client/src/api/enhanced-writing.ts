@@ -112,7 +112,7 @@ export interface DialogueResult {
 
 export const enhancedWritingApi = {
   async showDontTell(text: string, options?: {
-    provider?: 'openai' | 'claude'
+    provider?: 'openai' | 'claude' | 'mimo' | 'deepseek'
     model?: string
     temperature?: number
   }) {
@@ -124,7 +124,7 @@ export const enhancedWritingApi = {
   },
 
   async enhanceDescription(text: string, options?: {
-    provider?: 'openai' | 'claude'
+    provider?: 'openai' | 'claude' | 'mimo' | 'deepseek'
     model?: string
     temperature?: number
     focus?: 'visual' | 'sensory' | 'emotional' | 'atmosphere'
@@ -138,7 +138,7 @@ export const enhancedWritingApi = {
   },
 
   async rewrite(text: string, options?: {
-    provider?: 'openai' | 'claude'
+    provider?: 'openai' | 'claude' | 'mimo' | 'deepseek'
     model?: string
     temperature?: number
     style?: 'vivid' | 'literary' | 'concise' | 'dramatic' | 'poetic'
@@ -152,7 +152,7 @@ export const enhancedWritingApi = {
   },
 
   async brainstorm(prompt: string, options?: {
-    provider?: 'openai' | 'claude'
+    provider?: 'openai' | 'claude' | 'mimo' | 'deepseek'
     model?: string
     temperature?: number
     type?: 'plot' | 'character' | 'dialogue' | 'worldbuilding' | 'conflict'
@@ -166,7 +166,7 @@ export const enhancedWritingApi = {
   },
 
   async generateDialogue(context: string, characterNames: string[], options?: {
-    provider?: 'openai' | 'claude'
+    provider?: 'openai' | 'claude' | 'mimo' | 'deepseek'
     model?: string
     temperature?: number
   }) {

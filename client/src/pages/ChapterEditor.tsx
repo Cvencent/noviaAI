@@ -5,6 +5,7 @@ import {
   Sparkles, 
   AlertTriangle,
   BookOpen,
+  Clipboard,
   Eye,
   Search,
   X,
@@ -14,7 +15,8 @@ import {
   Palette,
   Flag,
   MessageSquare,
-  GitBranch
+  GitBranch,
+  Trash2
 } from 'lucide-react'
 import { Button } from '../components/ui/Button'
 import { Card } from '../components/ui/Card'
@@ -30,7 +32,7 @@ import { LorebookManager } from '../components/LorebookManager'
 import { ChekhovsGunManager } from '../components/ChekhovsGunManager'
 import { DialogueSandbox } from '../components/DialogueSandbox'
 import { StorySystemPanel } from '../components/StorySystemPanel'
-import { ReviewIssue, storySystemApi } from '../api/story-system'
+import { ReviewIssue, StoryAiJob, StoryWriteResult, storySystemApi } from '../api/story-system'
 import { RichTextEditor, RichTextEditorHandle } from '../components/editor/RichTextEditor'
 import { ContextViewer } from '../components/ContextViewer'
 import { StreamingCursor } from '../components/StreamingCursor'
@@ -39,6 +41,7 @@ import { useDebounce } from '../hooks/useDebounce'
 import { ContentChange } from '../types/ai-changes'
 import type { ContextPreview } from '../types/ai-context'
 import { DiffRange } from '../components/editor/DiffHighlight'
+import { useToast } from '../contexts/ToastContext'
 
 interface WorldConflict {
   type: string
@@ -58,10 +61,20 @@ function escapeHtml(text: string) {
     .replace(/'/g, '&#039;')
 }
 
+function parseStoryJobResult<T>(job?: StoryAiJob | null): T | null {
+  if (!job?.result) return null
+  try {
+    return JSON.parse(job.result) as T
+  } catch {
+    return null
+  }
+}
+
 export function ChapterEditor() {
   const { projectId, chapterId } = useParams<{ projectId: string; chapterId: string }>()
   const navigate = useNavigate()
   const editorRef = useRef<RichTextEditorHandle>(null)
+  const { success, error, warning } = useToast()
 
   const [content, setContent] = useState('')
   const [title, setTitle] = useState('')
@@ -101,6 +114,8 @@ export function ChapterEditor() {
   const [isStoryWriting, setIsStoryWriting] = useState(false)
   const [storyWriteError, setStoryWriteError] = useState('')
   const [storyWriteText, setStoryWriteText] = useState('')
+  const [storyWriteJob, setStoryWriteJob] = useState<StoryAiJob | null>(null)
+  const [dismissedStoryWriteJobId, setDismissedStoryWriteJobId] = useState<string | null>(null)
   const contentRef = useRef('')
   const lastSavedContentRef = useRef('')
   const aiOriginalContentRef = useRef('')
@@ -298,16 +313,18 @@ export function ChapterEditor() {
       if (result.hasConflict && result.conflicts.length > 0) {
         setConflicts(result.conflicts)
         setShowConflictModal(true)
+        warning(`发现 ${result.conflicts.length} 个潜在冲突`)
       } else {
         setConflicts([])
         setShowConflictModal(false)
       }
-    } catch (error) {
-      console.error('冲突检测失败:', error)
+    } catch (err) {
+      error('冲突检测失败')
+      console.error('冲突检测失败:', err)
     } finally {
       setIsCheckingConflicts(false)
     }
-  }, [projectId])
+  }, [projectId, warning, error])
 
   const handleSave = async () => {
     if (!projectId || !chapterId) return
@@ -322,9 +339,11 @@ export function ChapterEditor() {
       await chaptersApi.updateContent(projectId, chapterId, { title, contents })
       lastSavedContentRef.current = content
       setLastSaved(new Date())
+      success('章节保存成功')
       await checkConflicts(content)
-    } catch (error) {
-      console.error('保存失败:', error)
+    } catch (err) {
+      error('章节保存失败')
+      console.error('保存失败:', err)
     } finally {
       setIsSaving(false)
     }
@@ -407,6 +426,42 @@ export function ChapterEditor() {
     },
   })
 
+  const refreshStoryWriteJobs = useCallback(async () => {
+    if (!projectId || !chapterId) return null
+    const jobs = await storySystemApi.listAiJobs(projectId, chapterId)
+    const latestWriteJob = jobs.find((job) => job.type === 'WRITE_CHAPTER') || null
+    if (latestWriteJob && latestWriteJob.id !== dismissedStoryWriteJobId) {
+      const result = parseStoryJobResult<StoryWriteResult>(latestWriteJob)
+      setStoryWriteJob(latestWriteJob)
+      setIsStoryWriting(['PENDING', 'RUNNING'].includes(latestWriteJob.status))
+      setStoryWriteError(latestWriteJob.status === 'FAILED' ? latestWriteJob.error || 'Story System 续写失败' : '')
+      setStoryWriteText(result?.completion || '')
+    } else if (!latestWriteJob) {
+      setStoryWriteJob(null)
+      setIsStoryWriting(false)
+      setStoryWriteText('')
+      setStoryWriteError('')
+    }
+    return latestWriteJob
+  }, [projectId, chapterId, dismissedStoryWriteJobId])
+
+  useEffect(() => {
+    if (!projectId || !chapterId) return
+    refreshStoryWriteJobs().catch((error) => {
+      console.error('加载 Story AI 任务失败:', error)
+    })
+  }, [projectId, chapterId, refreshStoryWriteJobs])
+
+  useEffect(() => {
+    if (!storyWriteJob || !['PENDING', 'RUNNING'].includes(storyWriteJob.status)) return
+    const timer = window.setInterval(() => {
+      refreshStoryWriteJobs().catch((error) => {
+        console.error('刷新 Story AI 任务失败:', error)
+      })
+    }, 2500)
+    return () => window.clearInterval(timer)
+  }, [storyWriteJob, refreshStoryWriteJobs])
+
   const handleAiWrite = async () => {
     const originalContent = contentRef.current
     if (!projectId || !chapterId) return
@@ -419,23 +474,47 @@ export function ChapterEditor() {
     setIsStoryWriting(true)
     setStoryWriteError('')
     setStoryWriteText('')
+    setDismissedStoryWriteJobId(null)
     try {
-      const result = await storySystemApi.writeChapter(projectId, chapterId, {
+      const job = await storySystemApi.createAiJob(projectId, chapterId, {
+        type: 'WRITE_CHAPTER',
         content: originalContent,
       })
-      if (result.blocked) {
-        setStoryWriteError(result.preflight.blockingReasons.join('；') || 'Story System 预检阻断')
-        return
-      }
-      setStoryWriteText(result.completion)
-      await appendAiText(result.completion, originalContent)
-      await loadContextPreview()
+      setStoryWriteJob(job)
+      success('Story 续写任务已开始，离开页面也会继续生成')
     } catch (error) {
       console.error('Story System 续写失败:', error)
       setStoryWriteError(error instanceof Error ? error.message : 'Story System 续写失败')
-    } finally {
       setIsStoryWriting(false)
     }
+  }
+
+  const applyStoryWriteResult = async () => {
+    const result = parseStoryJobResult<StoryWriteResult>(storyWriteJob)
+    if (!result) return
+    if (result.blocked) {
+      setStoryWriteError(result.preflight?.blockingReasons?.join('；') || 'Story System 预检阻断')
+      return
+    }
+    await appendAiText(result.completion, aiOriginalContentRef.current || contentRef.current)
+    setDismissedStoryWriteJobId(storyWriteJob?.id || null)
+    setStoryWriteJob(null)
+    setStoryWriteText('')
+    await loadContextPreview()
+  }
+
+  const discardStoryWriteResult = () => {
+    setDismissedStoryWriteJobId(storyWriteJob?.id || null)
+    setStoryWriteJob(null)
+    setStoryWriteText('')
+    setStoryWriteError('')
+    setIsStoryWriting(false)
+  }
+
+  const copyStoryWriteResult = async () => {
+    if (!storyWriteText.trim()) return
+    await navigator.clipboard?.writeText(storyWriteText)
+    success('已复制 AI 续写候选')
   }
 
   useEffect(() => {
@@ -702,14 +781,32 @@ export function ChapterEditor() {
                 className="w-full h-full min-h-[500px]"
               />
             </Card>
-            {(isStreaming || streamedText || streamingError || isStoryWriting || storyWriteText || storyWriteError) && (
+            {(isStreaming || streamedText || streamingError || isStoryWriting || storyWriteText || storyWriteError || storyWriteJob) && (
               <Card className="mt-4 p-4">
-                <div className="mb-2 text-sm text-gray-500">
-                  {isStoryWriting
-                    ? 'Story System 正在生成：'
-                    : storyWriteError || streamingError
-                      ? 'AI 生成失败'
-                      : 'AI 生成结果'}
+                <div className="mb-2 flex items-center justify-between gap-3">
+                  <div className="text-sm text-gray-500">
+                    {isStoryWriting
+                      ? 'Story System 正在后台生成'
+                      : storyWriteError || streamingError
+                        ? 'AI 生成失败'
+                        : 'AI 生成候选'}
+                  </div>
+                  {storyWriteJob?.status === 'DONE' && storyWriteText && (
+                    <div className="flex items-center gap-2">
+                      <Button variant="outline" size="sm" onClick={copyStoryWriteResult}>
+                        <Clipboard className="w-4 h-4 mr-2" />
+                        复制
+                      </Button>
+                      <Button variant="outline" size="sm" onClick={discardStoryWriteResult}>
+                        <Trash2 className="w-4 h-4 mr-2" />
+                        丢弃
+                      </Button>
+                      <Button size="sm" onClick={applyStoryWriteResult}>
+                        <Check className="w-4 h-4 mr-2" />
+                        应用到正文
+                      </Button>
+                    </div>
+                  )}
                 </div>
                 {storyWriteError || streamingError ? (
                   <div className="text-sm text-red-600">{storyWriteError || streamingError?.message}</div>

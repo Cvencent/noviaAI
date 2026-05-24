@@ -23,6 +23,18 @@ export class StartStoryAgentRunDto {
   @IsString()
   @IsOptional()
   instruction?: string
+
+  @IsString()
+  @IsOptional()
+  templateId?: string
+
+  @IsString()
+  @IsOptional()
+  projectTemplateId?: string
+
+  @IsString()
+  @IsOptional()
+  chapterTemplateId?: string
 }
 
 export class ContinueStoryAgentRunDto {
@@ -101,6 +113,18 @@ export class RepairChapterDto {
   @IsString()
   @IsOptional()
   repairPlanId?: string
+
+  @IsString()
+  @IsOptional()
+  templateId?: string
+
+  @IsString()
+  @IsOptional()
+  projectTemplateId?: string
+
+  @IsString()
+  @IsOptional()
+  chapterTemplateId?: string
 }
 
 export class DismissRepairPlanDto {
@@ -147,6 +171,27 @@ export class WriteChapterDto {
   @IsNumber()
   @IsOptional()
   maxTokens?: number
+
+  @IsString()
+  @IsOptional()
+  templateId?: string
+
+  @IsString()
+  @IsOptional()
+  projectTemplateId?: string
+
+  @IsString()
+  @IsOptional()
+  chapterTemplateId?: string
+}
+
+export class CreateStoryAiJobDto extends WriteChapterDto {
+  @IsString()
+  type!: 'WRITE_CHAPTER' | 'REPAIR_CHAPTER' | string
+
+  @IsString()
+  @IsOptional()
+  repairPlanId?: string
 }
 
 export class ExportBookDto {

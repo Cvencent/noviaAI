@@ -8,6 +8,8 @@ export interface Project {
   tags: string
   status: string
   wordCount: number
+  webNovelTemplateId?: string | null
+  chapterTemplateId?: string | null
   createdAt: string
   updatedAt: string
   worldSettings?: WorldSetting[]
@@ -142,6 +144,8 @@ export interface CreateProjectDto {
   tags?: string
   status?: string
   wordCount?: number
+  webNovelTemplateId?: string | null
+  chapterTemplateId?: string | null
 }
 
 export interface UpdateProjectDto {
@@ -152,4 +156,6 @@ export interface UpdateProjectDto {
   tags?: string
   status?: string
   wordCount?: number
+  webNovelTemplateId?: string | null
+  chapterTemplateId?: string | null
 }

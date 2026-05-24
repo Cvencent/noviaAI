@@ -6,7 +6,7 @@ export const aiApi = {
     projectId: string
     chapterId?: string
     content: string
-    provider?: 'openai' | 'claude'
+    provider?: 'openai' | 'claude' | 'deepseek' | 'mimo'
     model?: string
     temperature?: number
     maxTokens?: number
@@ -55,3 +55,8 @@ export const aiApi = {
     return response.data
   },
 }
+
+export const STREAM_ENDPOINTS = {
+  TEXT_COMPLETE: '/ai/text-complete-stream',
+  CHAT: '/ai/chat-stream',
+} as const

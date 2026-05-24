@@ -15,8 +15,9 @@ import { Input } from '../components/ui/Input'
 import { Textarea } from '../components/ui/Textarea'
 import { Modal } from '../components/ui/Modal'
 import { Select } from '../components/ui/Select'
-import { charactersApi, Character } from '../api/characters'
-import { aiApi } from '../api/ai'
+import { charactersApi, Character } from '../api/characters';
+import { STREAM_ENDPOINTS } from '../api/ai';
+import { useStream } from '../hooks/useStream';
 
 const ROLE_OPTIONS = [
   { value: 'protagonist', label: '主角' },
@@ -85,7 +86,6 @@ export function CharacterManagement() {
 
   const [showAiModal, setShowAiModal] = useState(false)
   const [aiPrompt, setAiPrompt] = useState('')
-  const [isAiGenerating, setIsAiGenerating] = useState(false)
   const [aiGeneratedCharacter, setAiGeneratedCharacter] = useState<CharacterFormData | null>(null)
 
   const [activeTab, setActiveTab] = useState<'list' | 'graph'>('list')
@@ -103,6 +103,29 @@ export function CharacterManagement() {
     voice: '',
     notes: '',
   })
+
+  const [aiStreamedText, setAiStreamedText] = useState('')
+
+  const { isStreaming, streamedText, error: streamError, startStream, reset } = useStream({
+    endpoint: STREAM_ENDPOINTS.CHAT,
+    onComplete: (fullText) => {
+      try {
+        const jsonMatch = fullText.match(/\{[\s\S]*\}/)
+        if (jsonMatch) {
+          const parsed = JSON.parse(jsonMatch[0])
+          setAiGeneratedCharacter(parsed)
+        }
+      } catch {
+        console.error('解析AI返回失败')
+      }
+    },
+  })
+
+  useEffect(() => {
+    if (isStreaming) {
+      setAiStreamedText(streamedText)
+    }
+  }, [isStreaming, streamedText])
 
   useEffect(() => {
     loadCharacters()
@@ -203,27 +226,14 @@ export function CharacterManagement() {
 
   const handleAiGenerate = async () => {
     if (!aiPrompt.trim()) return
-    setIsAiGenerating(true)
-    try {
-      const result = await aiApi.chat({
-        projectId: projectId!,
-        message: `请根据以下描述生成一个详细的人物设定（返回JSON格式，包含name, role, appearance, personality, background, goals, flaws, arc, voice字段）：\n\n${aiPrompt}`,
-      })
+    setAiGeneratedCharacter(null)
+    setAiStreamedText('')
+    reset()
 
-      try {
-        const jsonMatch = result.response.match(/\{[\s\S]*\}/)
-        if (jsonMatch) {
-          const parsed = JSON.parse(jsonMatch[0])
-          setAiGeneratedCharacter(parsed)
-        }
-      } catch {
-        console.error('解析AI返回失败')
-      }
-    } catch (error) {
-      console.error('AI生成失败:', error)
-    } finally {
-      setIsAiGenerating(false)
-    }
+    await startStream({
+      projectId: projectId!,
+      message: `请根据以下描述生成一个详细的人物设定（返回JSON格式，包含name, role, appearance, personality, background, goals, flaws, arc, voice字段）：\n\n${aiPrompt}`,
+    })
   }
 
   const handleApplyAiCharacter = () => {
@@ -757,6 +767,8 @@ export function CharacterManagement() {
           setShowAiModal(false)
           setAiPrompt('')
           setAiGeneratedCharacter(null)
+          setAiStreamedText('')
+          reset()
         }}
         title="AI 生成人物"
       >
@@ -773,12 +785,29 @@ export function CharacterManagement() {
             />
           </div>
 
-          <Button onClick={handleAiGenerate} disabled={isAiGenerating || !aiPrompt.trim()}>
+          <Button onClick={handleAiGenerate} disabled={isStreaming || !aiPrompt.trim()}>
             <Sparkles className="w-4 h-4 mr-2" />
-            {isAiGenerating ? '生成中...' : '生成人物设定'}
+            {isStreaming ? '生成中...' : '生成人物设定'}
           </Button>
 
-          {aiGeneratedCharacter && (
+          {isStreaming && (
+            <div className="border rounded-lg p-4 bg-yellow-50 space-y-2">
+              <div className="animate-pulse">
+                <h4 className="font-medium text-yellow-900">正在生成...</h4>
+                <p className="text-sm text-yellow-700 mt-2 whitespace-pre-wrap break-words">
+                  {aiStreamedText}
+                </p>
+              </div>
+            </div>
+          )}
+
+          {streamError && (
+            <div className="border rounded-lg p-3 bg-red-50 text-sm text-red-700">
+              {streamError.message}
+            </div>
+          )}
+
+          {!isStreaming && aiGeneratedCharacter && (
             <div className="border rounded-lg p-4 bg-gray-50 space-y-2">
               <h4 className="font-medium text-gray-900">{aiGeneratedCharacter.name}</h4>
               <p className="text-sm text-gray-600">

@@ -12,7 +12,7 @@ export class EnhancedWritingController {
   async showDontTell(
     @Body() body: {
       text: string
-      provider?: 'openai' | 'claude'
+      provider?: 'openai' | 'claude' | 'mimo' | 'deepseek'
       model?: string
       temperature?: number
     },
@@ -25,7 +25,7 @@ export class EnhancedWritingController {
   async enhanceDescription(
     @Body() body: {
       text: string
-      provider?: 'openai' | 'claude'
+      provider?: 'openai' | 'claude' | 'mimo' | 'deepseek'
       model?: string
       temperature?: number
       focus?: 'visual' | 'sensory' | 'emotional' | 'atmosphere'
@@ -40,7 +40,7 @@ export class EnhancedWritingController {
   async rewrite(
     @Body() body: {
       text: string
-      provider?: 'openai' | 'claude'
+      provider?: 'openai' | 'claude' | 'mimo' | 'deepseek'
       model?: string
       temperature?: number
       style?: 'vivid' | 'literary' | 'concise' | 'dramatic' | 'poetic'
@@ -55,7 +55,7 @@ export class EnhancedWritingController {
   async brainstorm(
     @Body() body: {
       prompt: string
-      provider?: 'openai' | 'claude'
+      provider?: 'openai' | 'claude' | 'mimo' | 'deepseek'
       model?: string
       temperature?: number
       type?: 'plot' | 'character' | 'dialogue' | 'worldbuilding' | 'conflict'
@@ -71,7 +71,7 @@ export class EnhancedWritingController {
     @Body() body: {
       context: string
       characterNames: string[]
-      provider?: 'openai' | 'claude'
+      provider?: 'openai' | 'claude' | 'mimo' | 'deepseek'
       model?: string
       temperature?: number
     },

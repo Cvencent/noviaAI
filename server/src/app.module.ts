@@ -22,6 +22,7 @@ import { ConsistencyModule } from './modules/consistency/consistency.module'
 import { DialogueSessionsModule } from './modules/dialogue-sessions/dialogue-sessions.module'
 import { StorySystemModule } from './modules/story-system/story-system.module'
 import { ReaderExperienceModule } from './modules/reader-experience/reader-experience.module'
+import { ChekhovsGunsModule } from './modules/chekhovs-guns/chekhovs-guns.module'
 
 @Module({
   imports: [
@@ -50,6 +51,7 @@ import { ReaderExperienceModule } from './modules/reader-experience/reader-exper
     DialogueSessionsModule,
     StorySystemModule,
     ReaderExperienceModule,
+    ChekhovsGunsModule,
   ],
 })
 export class AppModule {}

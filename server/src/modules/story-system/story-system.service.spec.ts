@@ -130,6 +130,12 @@ describe('StorySystemService', () => {
         update: jest.fn(),
         findMany: jest.fn(),
       },
+      storyAiJob: {
+        create: jest.fn(),
+        findMany: jest.fn(),
+        findFirst: jest.fn(),
+        update: jest.fn(),
+      },
       storyEntity: {
         upsert: jest.fn(),
         findMany: jest.fn(),
@@ -258,6 +264,7 @@ describe('StorySystemService', () => {
       'working',
       'episodic',
       'semantic',
+      'web-novel-template',
       'style',
       'constraints',
     ])
@@ -1486,6 +1493,94 @@ describe('StorySystemService', () => {
     expect(prisma.projectionJob.findMany).toHaveBeenCalledWith({
       where: { projectId: 'project-1' },
       orderBy: { createdAt: 'desc' },
+    })
+  })
+
+  it('creates a resumable write job and stores the completion when the background task finishes', async () => {
+    mockProjectGraph()
+    prisma.storyAiJob.create.mockImplementation(({ data }: any) => Promise.resolve({
+      id: 'ai-job-1',
+      projectId: 'project-1',
+      chapterId: 'chapter-1',
+      type: data.type,
+      status: data.status,
+      input: data.input,
+      result: data.result,
+      error: data.error,
+      createdAt: new Date('2026-05-24T00:00:00.000Z'),
+      updatedAt: new Date('2026-05-24T00:00:00.000Z'),
+    }))
+    prisma.storyContract.upsert.mockImplementation(({ create }: any) => Promise.resolve(create))
+    prisma.storyContract.findMany
+      .mockResolvedValueOnce([
+        { type: 'MASTER_SETTING', payload: '{}' },
+        { type: 'VOLUME_BRIEF', payload: '{}' },
+        { type: 'CHAPTER_BRIEF', payload: JSON.stringify({ chapterDirective: { goal: '追问沈遥' } }) },
+        { type: 'REVIEW_CONTRACT', payload: JSON.stringify({ mustCheck: [], blockingRules: [] }) },
+      ])
+      .mockResolvedValueOnce([
+        { type: 'CHAPTER_BRIEF', payload: JSON.stringify({ chapterDirective: { goal: '追问沈遥' } }) },
+        { type: 'REVIEW_CONTRACT', payload: JSON.stringify({ mustCheck: [], blockingRules: [] }) },
+      ])
+    prisma.chapterCommit.findFirst.mockResolvedValue(null)
+    prisma.storyContextPack.create.mockImplementation(({ data }: any) => Promise.resolve({ id: 'pack-1', ...data }))
+    prisma.storyAgentRun.create.mockResolvedValue({
+      id: 'run-1',
+      projectId: 'project-1',
+      chapterId: 'chapter-1',
+      status: 'RUNNING',
+      currentStep: 'CONTEXT',
+      steps: [],
+    })
+    prisma.storyAgentStep.create.mockImplementation(({ data }: any) => Promise.resolve({ id: `${data.stepType}-1`, ...data }))
+    prisma.storyAgentRun.update.mockResolvedValue({ id: 'run-1', status: 'PAUSED', currentStep: 'REVIEW' })
+    prisma.storyAiJob.update.mockImplementation(({ data }: any) => Promise.resolve({ id: 'ai-job-1', ...data }))
+    aiService.chat.mockResolvedValue({ response: '林澄把芯片推到沈遥面前。' })
+
+    const job = await service.createStoryAiJob('user-1', 'project-1', 'chapter-1', {
+      type: 'WRITE_CHAPTER',
+      content: '林澄站在旧港。',
+      instruction: '强化对峙',
+    })
+    await service.waitForIdleStoryAiJobs()
+
+    expect(job).toEqual(expect.objectContaining({
+      id: 'ai-job-1',
+      type: 'WRITE_CHAPTER',
+      status: 'RUNNING',
+    }))
+    expect(prisma.storyAiJob.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({
+        projectId: 'project-1',
+        chapterId: 'chapter-1',
+        type: 'WRITE_CHAPTER',
+        status: 'RUNNING',
+        input: expect.stringContaining('强化对峙'),
+      }),
+    })
+    expect(prisma.storyAiJob.update).toHaveBeenCalledWith({
+      where: { id: 'ai-job-1' },
+      data: expect.objectContaining({
+        status: 'DONE',
+        result: expect.stringContaining('林澄把芯片推到沈遥面前。'),
+      }),
+    })
+  })
+
+  it('lists story AI jobs for the current chapter newest first', async () => {
+    mockProjectGraph()
+    prisma.storyAiJob.findMany.mockResolvedValue([
+      { id: 'ai-job-2', projectId: 'project-1', chapterId: 'chapter-1', type: 'REPAIR_CHAPTER', status: 'DONE', input: '{}', result: '{}' },
+      { id: 'ai-job-1', projectId: 'project-1', chapterId: 'chapter-1', type: 'WRITE_CHAPTER', status: 'RUNNING', input: '{}', result: null },
+    ])
+
+    const jobs = await service.listStoryAiJobs('user-1', 'project-1', 'chapter-1')
+
+    expect(jobs).toHaveLength(2)
+    expect(prisma.storyAiJob.findMany).toHaveBeenCalledWith({
+      where: { projectId: 'project-1', chapterId: 'chapter-1' },
+      orderBy: { createdAt: 'desc' },
+      take: 10,
     })
   })
 

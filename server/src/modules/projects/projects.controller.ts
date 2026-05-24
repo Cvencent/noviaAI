@@ -33,6 +33,38 @@ export class ProjectsController {
     return this.aiProjectGeneratorService.generateWorldSettings(user.id, id, body.count)
   }
 
+  @Post(':id/ai-expand-character/:characterId')
+  async aiExpandCharacter(
+    @CurrentUser() user: any,
+    @Param('id') projectId: string,
+    @Param('characterId') characterId: string
+  ) {
+    return this.aiProjectGeneratorService.expandCharacter(user.id, projectId, characterId)
+  }
+
+  @Post(':id/ai-expand-world-setting/:settingId')
+  async aiExpandWorldSetting(
+    @CurrentUser() user: any,
+    @Param('id') projectId: string,
+    @Param('settingId') settingId: string
+  ) {
+    return this.aiProjectGeneratorService.expandWorldSetting(user.id, projectId, settingId)
+  }
+
+  @Get(':id/ai-suggestions')
+  async aiGenerateSuggestions(@CurrentUser() user: any, @Param('id') projectId: string) {
+    return this.aiProjectGeneratorService.generateProjectSuggestions(user.id, projectId)
+  }
+
+  @Post(':id/ai-chapter-outline')
+  async aiGenerateChapterOutline(
+    @CurrentUser() user: any,
+    @Param('id') projectId: string,
+    @Body() body: { chapterId?: string, content?: string }
+  ) {
+    return this.aiProjectGeneratorService.generateChapterOutline(user.id, projectId, body.chapterId, body.content)
+  }
+
   @Get()
   async findAll(@CurrentUser() user: any) {
     return this.projectsService.findAll(user.id)
@@ -65,5 +97,26 @@ export class ProjectsController {
   @Post('import')
   async importProject(@CurrentUser() user: any, @Body() jsonData: any) {
     return this.projectsService.importProject(user.id, jsonData)
+  }
+
+  @Get(':id/template')
+  async getProjectTemplate(@CurrentUser() user: any, @Param('id') id: string) {
+    const project = await this.projectsService.findOne(user.id, id)
+    return {
+      webNovelTemplateId: project.webNovelTemplateId || null,
+      chapterTemplateId: project.chapterTemplateId || null,
+    }
+  }
+
+  @Put(':id/template')
+  async updateProjectTemplate(
+    @CurrentUser() user: any,
+    @Param('id') id: string,
+    @Body() body: { webNovelTemplateId?: string | null; chapterTemplateId?: string | null },
+  ) {
+    return this.projectsService.update(user.id, id, {
+      webNovelTemplateId: body.webNovelTemplateId,
+      chapterTemplateId: body.chapterTemplateId,
+    })
   }
 }

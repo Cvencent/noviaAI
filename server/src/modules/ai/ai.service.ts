@@ -23,7 +23,7 @@ const DEFAULT_MODELS: Record<ProviderName, string> = {
   openai: 'gpt-4',
   claude: 'claude-3-sonnet-20240229',
   deepseek: 'deepseek-chat',
-  mimo: 'xiaomi/mimo-v2.5-pro',
+  mimo: 'mimo-v2.5-pro',
 }
 
 @Injectable()
@@ -47,7 +47,7 @@ export class AiService {
     const model = dto.model || config?.model || DEFAULT_MODELS[providerName]
     const provider = this.getProvider(providerName)
     const keyData = await this.getApiKey(userId, providerName)
-    
+
     if (!keyData) {
       throw new InternalServerErrorException('未配置 API Key')
     }
@@ -57,7 +57,7 @@ export class AiService {
       provider.setBaseUrl(keyData.baseUrl)
     }
 
-    const messages: ChatMessage[] = dto.history 
+    const messages: ChatMessage[] = dto.history
       ? [...dto.history, { role: 'user' as const, content: dto.message }]
       : [{ role: 'user' as const, content: dto.message }]
 
@@ -78,11 +78,39 @@ export class AiService {
     }
   }
 
+  async *chatStream(userId: string, dto: ChatDto): AsyncGenerator<string> {
+    const config = await this.aiConfigService.getConfig(userId, dto.action ?? DEFAULT_CHAT_ACTION)
+    const providerName = this.toProviderName(dto.provider ?? config?.provider) ?? 'openai'
+    const model = dto.model || config?.model || DEFAULT_MODELS[providerName]
+    const provider = this.getProvider(providerName)
+    const keyData = await this.getApiKey(userId, providerName)
+
+    if (!keyData) {
+      throw new InternalServerErrorException('未配置 API Key')
+    }
+
+    provider.setApiKey(keyData.apiKey)
+    if (keyData.baseUrl) {
+      provider.setBaseUrl(keyData.baseUrl)
+    }
+
+    const messages: ChatMessage[] = dto.history
+      ? [...dto.history, { role: 'user' as const, content: dto.message }]
+      : [{ role: 'user' as const, content: dto.message }]
+
+    yield* provider.chatStream({
+      model,
+      messages,
+      temperature: dto.temperature,
+      maxTokens: dto.maxTokens,
+    })
+  }
+
   async consistencyCheck(userId: string, dto: ConsistencyCheckDto) {
     const config = await this.aiConfigService.getConfig(userId, AIAction.CONSISTENCY_CHECK)
     const providerName = this.toProviderName(dto.provider ?? config?.provider) ?? 'claude'
     const model = dto.model || config?.model || 'claude-3-sonnet-20240229'
-    
+
     const keyData = await this.getApiKey(userId, providerName)
     if (!keyData) {
       throw new InternalServerErrorException('未配置 API Key')
@@ -95,7 +123,7 @@ export class AiService {
     }
 
     const context = await this.buildContext(dto.projectId)
-    
+
     const systemPrompt = `你是一位专业的小说一致性检查员。请检查以下内容是否存在以下问题：
 1. 人物外貌描述前后不一致
 2. 人物性格与行为不符
@@ -128,7 +156,7 @@ ${context}
     const config = await this.aiConfigService.getConfig(userId, AIAction.SUMMARY_GENERATION)
     const providerName = this.toProviderName(dto.provider ?? config?.provider) ?? 'openai'
     const model = dto.model || config?.model || 'gpt-4'
-    
+
     const keyData = await this.getApiKey(userId, providerName)
     if (!keyData) {
       throw new InternalServerErrorException('未配置 API Key')
@@ -141,7 +169,7 @@ ${context}
     }
 
     let content = ''
-    
+
     if (dto.chapterId) {
       const chapter = await this.prisma.chapter.findUnique({
         where: { id: dto.chapterId },
@@ -151,7 +179,7 @@ ${context}
           },
         },
       })
-      
+
       if (chapter) {
         content = chapter.contents.map(c => c.content).join('\n')
       }
@@ -183,7 +211,7 @@ ${context}
     const config = await this.aiConfigService.getConfig(userId, AIAction.TEXT_COMPLETION)
     const providerName = this.toProviderName(dto.provider ?? config?.provider) ?? 'openai'
     const model = dto.model || config?.model || 'gpt-4'
-    
+
     const keyData = await this.getApiKey(userId, providerName)
     if (!keyData) {
       throw new InternalServerErrorException('未配置 API Key')
@@ -299,47 +327,108 @@ ${context}
   }
 
   private async buildContext(projectId: string): Promise<string> {
-    const project = await this.prisma.project.findUnique({
-      where: { id: projectId },
-      include: {
-        characters: {
-          take: 10,
-        },
-        chapters: {
-          orderBy: { order: 'desc' },
-          take: 3,
-          include: {
-            contents: {
-              orderBy: { order: 'desc' },
-              take: 1,
-            },
-          },
+    try {
+      const baseContext = await this.contextBuilderService.buildWritingContext(projectId)
+
+      const stylePrompt = await this.styleApplicationService.generateMultiStageStylePrompt(
+        projectId,
+        '',
+      )
+
+      const project = await this.prisma.project.findUnique({
+        where: { id: projectId },
+      })
+
+      let templateContext = ''
+      if (project?.webNovelTemplateId) {
+        const template = await this.getWebNovelTemplate(project.webNovelTemplateId)
+        if (template) {
+          templateContext = this.buildTemplateContext(template)
+        }
+      }
+
+      const fullContext = `${templateContext}
+
+${baseContext}
+
+${stylePrompt.fullPrompt}`
+
+      return fullContext
+    } catch (error) {
+      console.error('构建上下文失败:', error)
+      const project = await this.prisma.project.findUnique({
+        where: { id: projectId },
+      })
+      return `项目: ${project?.title || ''}
+类型: ${project?.genre || ''}
+简介: ${project?.synopsis || ''}`
+    }
+  }
+
+  private async getWebNovelTemplate(templateId: string) {
+    const templates = {
+      'shuangwen-system': {
+        name: '爽文/系统流',
+        promptBlocks: {
+          system: '按爽文/系统流写作：强钩子、快推进、强反馈，让读者持续获得期待与兑现。',
+          contract: '本章必须完成一次明确推进，能让读者感知升级、奖励、打脸或局势反转。',
+          pacing: '事件密度高，段落偏短，尽量把信息拆成可读的小块，并在结尾留下期待。',
+          taboo: '禁止大段设定讲解；禁止一章内把主线秘密全说完；金手指必须有代价、限制或冷却。',
+          chapter: '写出爽点、压力点和下一章钩子，让本章读完后还有继续读下去的欲望。',
         },
       },
-    })
-
-    if (!project) {
-      return ''
+      'xianxia': {
+        name: '修仙/玄幻',
+        promptBlocks: {
+          system: '按修仙/玄幻写作：突出境界、资源、法则与强弱秩序，兼顾机缘和压迫感。',
+          contract: '本章必须体现主角目标与世界规则之间的张力，并推进一次修行、争夺或身份变化。',
+          pacing: '允许少量铺垫，但每章要有资源、信息、能力或关系上的微兑现。',
+          taboo: '禁止堆设定；禁止突破无代价；禁止让角色绕开既有世界硬规则。',
+          chapter: '结尾留下一个更高层级的威胁、选择或机缘，让升级链条清晰延续。',
+        },
+      },
+      'urban-suspense': {
+        name: '都市悬疑',
+        promptBlocks: {
+          system: '按都市悬疑写作：让日常现实与谜团自然交织，用信息差驱动阅读。',
+          contract: '本章必须保留至少一个未解问题，同时给出一个新的观察角度或证据变化。',
+          pacing: '线索、误导、情绪压力交替出现，避免平铺直叙的解释。',
+          taboo: '不要强行解释谜底；不要让主角凭空全知；不要让关键线索没有前文依据。',
+          chapter: '让人物关系推动悬疑，结尾留下一句能让人停不住的钩子。',
+        },
+      },
+      'romance': {
+        name: '言情/甜宠',
+        promptBlocks: {
+          system: '按言情/甜宠写作：重点是人物互动的温度、节奏和关系张力。',
+          contract: '本章必须让关系往前走半步，同时留一点没说透的情绪。',
+          pacing: '场景切换轻巧，台词自然，情绪变化要可感知。',
+          taboo: '不要过度煽情；不要让角色变成单一功能；不要靠误会无限拖延。',
+          chapter: '收束时留一个让人会心一笑或心头一动的尾句。',
+        },
+      },
     }
+    return templates[templateId as keyof typeof templates] || null
+  }
 
-    const characterInfo = project.characters
-      .map(c => `人物: ${c.name}${c.role ? ` (${c.role})` : ''}${c.personality ? ` - 性格: ${c.personality}` : ''}`)
-      .join('\n')
-
-    const recentContent = project.chapters
-      .flatMap(ch => ch.contents.map(c => c.content))
-      .join('\n---\n')
-
+  private buildTemplateContext(template: any): string {
     return `
-项目: ${project.title}
-类型: ${project.genre}
-简介: ${project.synopsis}
+## 网文模板：${template.name}
 
-主要人物:
-${characterInfo || '暂无'}
+### 系统设定
+${template.promptBlocks.system}
 
-最近章节内容:
-${recentContent || '暂无'}
+### 本章契约
+${template.promptBlocks.contract}
+
+### 节奏要求
+${template.promptBlocks.pacing}
+
+### 禁忌事项
+${template.promptBlocks.taboo}
+
+### 章节目标
+${template.promptBlocks.chapter}
 `
   }
 

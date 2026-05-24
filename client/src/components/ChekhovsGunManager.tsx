@@ -5,22 +5,14 @@ import { Input } from './ui/Input'
 import { Select } from './ui/Select'
 import { Modal } from './ui/Modal'
 import { Card } from './ui/Card'
+import { LoadingSpinner } from './ui/LoadingSpinner'
+import { chekhovsGunsApi, ChekhovsGun as ChekhovsGunType } from '../api/chekhovs-guns'
+import { useToast } from '../contexts/ToastContext'
 
-interface ChekhovsGun {
-  id: string
-  name: string
-  description: string
-  setupText: string
-  setupChapterId?: string
-  setupPosition?: number
+interface ChekhovsGun extends Omit<ChekhovsGunType, 'status' | 'importance' | 'tags'> {
   status: 'setup' | 'reminder' | 'payoff' | 'abandoned'
-  payoffText?: string
-  payoffChapterId?: string
   importance: 'minor' | 'normal' | 'major' | 'critical'
   tags?: string[]
-  notes?: string
-  createdAt: string
-  updatedAt: string
 }
 
 interface ChekhovsGunManagerProps {
@@ -50,45 +42,7 @@ export function ChekhovsGunManager({ projectId }: ChekhovsGunManagerProps) {
   const [isCreateModalOpen, setIsCreateModalOpen] = useState(false)
   const [editingGun, setEditingGun] = useState<ChekhovsGun | null>(null)
   const [isLoading, setIsLoading] = useState(false)
-
-  // 模拟数据 - 等有API后替换
-  const mockGuns: ChekhovsGun[] = [
-    {
-      id: '1',
-      name: '墙上的枪',
-      description: '主角卧室墙上挂着的一把老式猎枪',
-      setupText: '他卧室的墙上挂着一把猎枪，枪管生锈了，但看起来还能用。',
-      status: 'setup',
-      importance: 'major',
-      tags: ['武器', '伏笔'],
-      notes: '这个伏笔应该在高潮场景回收',
-      createdAt: new Date().toISOString(),
-      updatedAt: new Date().toISOString(),
-    },
-    {
-      id: '2',
-      name: '神秘信件',
-      description: '主角收到的一封没有署名的信件',
-      setupText: '他收到一封奇怪的信，信封上没有寄信人地址，只有一个奇怪的印章。',
-      status: 'reminder',
-      importance: 'critical',
-      tags: ['信件', '神秘'],
-      createdAt: new Date().toISOString(),
-      updatedAt: new Date().toISOString(),
-    },
-    {
-      id: '3',
-      name: '旧照片',
-      description: '主角母亲留下的一张旧照片',
-      setupText: '他翻出母亲的旧物，发现一张褪色的照片，背面有一行模糊的字。',
-      payoffText: '他终于看清了照片背面的字："真相在老房子的阁楼里。"',
-      status: 'payoff',
-      importance: 'normal',
-      tags: ['回忆', '照片'],
-      createdAt: new Date().toISOString(),
-      updatedAt: new Date().toISOString(),
-    },
-  ]
+  const { success, error } = useToast()
 
   useEffect(() => {
     loadGuns()
@@ -113,28 +67,67 @@ export function ChekhovsGunManager({ projectId }: ChekhovsGunManagerProps) {
 
   const loadGuns = async () => {
     setIsLoading(true)
-    // TODO: 替换为真实API调用
-    setTimeout(() => {
-      setGuns(mockGuns)
+    try {
+      const data = await chekhovsGunsApi.getAllWithoutPagination(projectId)
+      const convertedGuns: ChekhovsGun[] = data.map(g => ({
+        ...g,
+        status: g.status as any,
+        importance: g.importance as any,
+        tags: g.tags ? g.tags.split(',').map(t => t.trim()).filter(Boolean) : undefined,
+      }))
+      setGuns(convertedGuns)
+    } catch (err) {
+      error('加载伏笔失败')
+      console.error('Failed to load Chekhovs guns:', err)
+    } finally {
       setIsLoading(false)
-    }, 500)
+    }
   }
 
   const handleDelete = async (gunId: string) => {
     if (!confirm('确定要删除这个伏笔吗？')) return
-    // TODO: API调用
-    setGuns(guns.filter(g => g.id !== gunId))
+    try {
+      await chekhovsGunsApi.delete(projectId, gunId)
+      setGuns(guns.filter(g => g.id !== gunId))
+      success('伏笔已删除')
+    } catch (err) {
+      error('删除伏笔失败')
+      console.error('Failed to delete Chekhovs gun:', err)
+    }
   }
 
-  const handleSave = async (data: Omit<ChekhovsGun, 'id' | 'createdAt' | 'updatedAt'>) => {
-    // TODO: API调用
-    if (editingGun) {
-      setGuns(guns.map(g => g.id === editingGun.id ? { ...g, ...data, id: editingGun.id } as ChekhovsGun : g))
-    } else {
-      setGuns([{ ...data, id: Date.now().toString(), createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() }, ...guns])
+  const handleSave = async (data: Omit<ChekhovsGun, 'id' | 'projectId' | 'createdAt' | 'updatedAt'>) => {
+    try {
+      const apiData = {
+        ...data,
+        tags: data.tags?.join(','),
+      }
+      if (editingGun) {
+        const updated = await chekhovsGunsApi.update(projectId, editingGun.id, apiData)
+        setGuns(guns.map(g => g.id === editingGun.id ? {
+          ...updated,
+          status: updated.status as any,
+          importance: updated.importance as any,
+          tags: updated.tags ? updated.tags.split(',').map(t => t.trim()).filter(Boolean) : undefined,
+        } as ChekhovsGun : g))
+        success('伏笔已更新')
+      } else {
+        const created = await chekhovsGunsApi.create(projectId, apiData)
+        const converted: ChekhovsGun = {
+          ...created,
+          status: created.status as any,
+          importance: created.importance as any,
+          tags: created.tags ? created.tags.split(',').map(t => t.trim()).filter(Boolean) : undefined,
+        }
+        setGuns([converted, ...guns])
+        success('伏笔已埋设')
+      }
+      setIsCreateModalOpen(false)
+      setEditingGun(null)
+    } catch (err) {
+      error('保存伏笔失败')
+      console.error('Failed to save Chekhovs gun:', err)
     }
-    setIsCreateModalOpen(false)
-    setEditingGun(null)
   }
 
   const stats = {
@@ -226,7 +219,9 @@ export function ChekhovsGunManager({ projectId }: ChekhovsGunManagerProps) {
       {/* 伏笔列表 */}
       <div className="flex-1 overflow-auto p-4">
         {isLoading ? (
-          <div className="text-center py-8 text-gray-500">加载中...</div>
+          <div className="flex items-center justify-center py-8">
+            <LoadingSpinner />
+          </div>
         ) : filteredGuns.length === 0 ? (
           <div className="text-center py-12 text-gray-500">
             <Target className="w-12 h-12 mx-auto mb-4 text-gray-300" />
@@ -323,7 +318,7 @@ export function ChekhovsGunManager({ projectId }: ChekhovsGunManagerProps) {
 interface ChekhovsGunModalProps {
   isOpen: boolean
   onClose: () => void
-  onSave: (data: Omit<ChekhovsGun, 'id' | 'createdAt' | 'updatedAt'>) => void
+  onSave: (data: Omit<ChekhovsGun, 'id' | 'projectId' | 'createdAt' | 'updatedAt'>) => void
   initialData?: ChekhovsGun | null
 }
 
@@ -413,31 +408,34 @@ function ChekhovsGunModal({ isOpen, onClose, onSave, initialData }: ChekhovsGunM
       isOpen={isOpen}
       onClose={onClose}
       title={initialData ? '编辑伏笔' : '埋设新伏笔'}
-      size="xl"
+      size="lg"
+      footer={
+        <div className="flex justify-end gap-3">
+          <Button variant="outline" onClick={onClose} disabled={isSaving}>
+            取消
+          </Button>
+          <Button onClick={handleSubmit} disabled={isSaving || !formData.name || !formData.description || !formData.setupText} isLoading={isSaving}>
+            {initialData ? '更新' : '埋设'}
+          </Button>
+        </div>
+      }
     >
       <div className="space-y-4">
-        {/* 基本信息 */}
-        <div>
-          <label className="text-sm font-medium block mb-1">伏笔名称 *</label>
-          <Input
-            value={formData.name}
-            onChange={(e) => setFormData({ ...formData, name: e.target.value })}
-            placeholder="例如：墙上的枪"
-          />
-        </div>
-
-        <div>
-          <label className="text-sm font-medium block mb-1">简短描述 *</label>
-          <Input
-            value={formData.description}
-            onChange={(e) => setFormData({ ...formData, description: e.target.value })}
-            placeholder="描述这个伏笔是什么..."
-          />
-        </div>
-
         <div className="grid grid-cols-2 gap-4">
-          <div>
-            <label className="text-sm font-medium block mb-1">状态</label>
+          <div className="col-span-2">
+            <label className="block text-sm font-medium text-gray-700 mb-1">
+              名称 *
+            </label>
+            <Input
+              value={formData.name}
+              onChange={(e) => setFormData({ ...formData, name: e.target.value })}
+              placeholder="伏笔名称，如：墙上的枪"
+            />
+          </div>
+          <div className="col-span-1">
+            <label className="block text-sm font-medium text-gray-700 mb-1">
+              状态
+            </label>
             <Select
               value={formData.status}
               onChange={(e) => setFormData({ ...formData, status: e.target.value as any })}
@@ -448,8 +446,10 @@ function ChekhovsGunModal({ isOpen, onClose, onSave, initialData }: ChekhovsGunM
               <option value="abandoned">已废弃</option>
             </Select>
           </div>
-          <div>
-            <label className="text-sm font-medium block mb-1">重要性</label>
+          <div className="col-span-1">
+            <label className="block text-sm font-medium text-gray-700 mb-1">
+              重要性
+            </label>
             <Select
               value={formData.importance}
               onChange={(e) => setFormData({ ...formData, importance: e.target.value as any })}
@@ -460,84 +460,84 @@ function ChekhovsGunModal({ isOpen, onClose, onSave, initialData }: ChekhovsGunM
               <option value="critical">关键</option>
             </Select>
           </div>
-        </div>
-
-        {/* 埋设内容 */}
-        <div>
-          <label className="text-sm font-medium block mb-1">埋设内容 (原文) *</label>
-          <textarea
-            value={formData.setupText}
-            onChange={(e) => setFormData({ ...formData, setupText: e.target.value })}
-            placeholder="伏笔下在哪里的原文..."
-            rows={3}
-            className="w-full px-3 py-2 border rounded-md"
-          />
-        </div>
-
-        {/* 回收内容 */}
-        {(formData.status === 'payoff' || formData.payoffText) && (
-          <div>
-            <label className="text-sm font-medium block mb-1">回收内容 (原文)</label>
+          <div className="col-span-2">
+            <label className="block text-sm font-medium text-gray-700 mb-1">
+              描述 *
+            </label>
+            <textarea
+              value={formData.description}
+              onChange={(e) => setFormData({ ...formData, description: e.target.value })}
+              rows={2}
+              className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+              placeholder="简单描述这个伏笔的用途"
+            />
+          </div>
+          <div className="col-span-2">
+            <label className="block text-sm font-medium text-gray-700 mb-1">
+              埋设内容 *
+            </label>
+            <textarea
+              value={formData.setupText}
+              onChange={(e) => setFormData({ ...formData, setupText: e.target.value })}
+              rows={3}
+              className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+              placeholder="具体的埋设内容，如：他卧室的墙上挂着一把猎枪"
+            />
+          </div>
+          <div className="col-span-2">
+            <label className="block text-sm font-medium text-gray-700 mb-1">
+              回收内容
+            </label>
             <textarea
               value={formData.payoffText}
               onChange={(e) => setFormData({ ...formData, payoffText: e.target.value })}
-              placeholder="伏笔回收时的原文..."
               rows={3}
-              className="w-full px-3 py-2 border rounded-md"
+              className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+              placeholder="伏笔回收时的内容"
             />
           </div>
-        )}
-
-        {/* 标签 */}
-        <div>
-          <label className="text-sm font-medium block mb-1">标签</label>
-          <div className="flex gap-2 mb-2">
-            <Input
-              value={formData.tagInput}
-              onChange={(e) => setFormData({ ...formData, tagInput: e.target.value })}
-              placeholder="输入标签后按回车或点击添加"
-              onKeyDown={(e) => {
-                if (e.key === 'Enter') {
-                  handleAddTag()
-                }
-              }}
+          <div className="col-span-2">
+            <label className="block text-sm font-medium text-gray-700 mb-1">
+              标签
+            </label>
+            <div className="flex gap-2 mb-2">
+              <Input
+                value={formData.tagInput}
+                onChange={(e) => setFormData({ ...formData, tagInput: e.target.value })}
+                placeholder="添加标签..."
+                onKeyDown={(e) => e.key === 'Enter' && handleAddTag()}
+              />
+              <Button onClick={handleAddTag} variant="outline">添加</Button>
+            </div>
+            {formData.tags.length > 0 && (
+              <div className="flex flex-wrap gap-2">
+                {formData.tags.map((tag, i) => (
+                  <span key={i} className="inline-flex items-center gap-1 text-xs px-3 py-1 bg-gray-100 text-gray-700 rounded-full">
+                    {tag}
+                    <button
+                      type="button"
+                      onClick={() => handleRemoveTag(tag)}
+                      className="text-gray-400 hover:text-gray-600"
+                    >
+                      &times;
+                    </button>
+                  </span>
+                ))}
+              </div>
+            )}
+          </div>
+          <div className="col-span-2">
+            <label className="block text-sm font-medium text-gray-700 mb-1">
+              笔记
+            </label>
+            <textarea
+              value={formData.notes}
+              onChange={(e) => setFormData({ ...formData, notes: e.target.value })}
+              rows={2}
+              className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+              placeholder="个人笔记"
             />
-            <Button onClick={handleAddTag}>
-              <Plus className="w-4 h-4" />
-            </Button>
           </div>
-          <div className="flex flex-wrap gap-2">
-            {formData.tags.map((tag, i) => (
-              <span key={i} className="flex items-center gap-1 px-3 py-1 bg-gray-100 text-gray-700 rounded-full text-sm">
-                {tag}
-                <button onClick={() => handleRemoveTag(tag)} className="hover:text-red-600">
-                  <X className="w-3 h-3" />
-                </button>
-              </span>
-            ))}
-          </div>
-        </div>
-
-        {/* 笔记 */}
-        <div>
-          <label className="text-sm font-medium block mb-1">作者笔记</label>
-          <textarea
-            value={formData.notes}
-            onChange={(e) => setFormData({ ...formData, notes: e.target.value })}
-            placeholder="给自己看的笔记，比如回收计划..."
-            rows={2}
-            className="w-full px-3 py-2 border rounded-md"
-          />
-        </div>
-
-        {/* 按钮 */}
-        <div className="flex justify-end gap-2 pt-4">
-          <Button variant="ghost" onClick={onClose}>
-            取消
-          </Button>
-          <Button onClick={handleSubmit} disabled={isSaving}>
-            {isSaving ? '保存中...' : '保存'}
-          </Button>
         </div>
       </div>
     </Modal>

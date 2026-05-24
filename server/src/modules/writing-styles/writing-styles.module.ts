@@ -10,8 +10,10 @@ import { OpenaiProvider } from '../ai/providers/openai.provider'
 import { ClaudeProvider } from '../ai/providers/claude.provider'
 import { DeepseekProvider } from '../ai/providers/deepseek.provider'
 import { MimoProvider } from '../ai/providers/mimo.provider'
+import { ApiKeysModule } from '../api-keys/api-keys.module'
 
 @Module({
+  imports: [ApiKeysModule],
   controllers: [WritingStylesController, LorebookController, EnhancedWritingController],
   providers: [
     WritingStylesService,

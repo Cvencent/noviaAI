@@ -34,7 +34,7 @@ export class CharactersController {
 
   @Get()
   async findAll(@Param('projectId') projectId: string) {
-    return this.charactersService.findAll(projectId)
+    return this.charactersService.findAllWithoutPagination(projectId)
   }
 
   @Get(':id')

@@ -19,10 +19,28 @@ export interface StoryContextSection {
   tokenEstimate: number
 }
 
+export interface StoryTemplateInfo {
+  id: string
+  name: string
+  source: 'project' | 'chapter'
+  description: string
+  hooks: string[]
+  pacingRules: string[]
+  tabooRules: string[]
+  promptBlocks: {
+    system: string
+    contract: string
+    pacing: string
+    taboo: string
+    chapter: string
+  }
+}
+
 export interface StoryContextPack {
   id: string
   status: string
   sections: StoryContextSection[]
+  template?: StoryTemplateInfo | null
   totalTokenEstimate: number
   warnings: string[]
 }
@@ -147,6 +165,19 @@ export interface StoryRepairResult {
   repairedText: string
   runId: string
   repairPlanId: string
+}
+
+export interface StoryAiJob {
+  id: string
+  projectId: string
+  chapterId: string
+  type: 'WRITE_CHAPTER' | 'REPAIR_CHAPTER' | string
+  status: 'PENDING' | 'RUNNING' | 'DONE' | 'FAILED' | string
+  input: string
+  result?: string | null
+  error?: string | null
+  createdAt: string
+  updatedAt: string
 }
 
 export interface FullBookReviewIssue {
@@ -312,6 +343,9 @@ export const storySystemApi = {
     instruction?: string
     temperature?: number
     maxTokens?: number
+    templateId?: string
+    projectTemplateId?: string
+    chapterTemplateId?: string
   }): Promise<StoryWriteResult> {
     const response = await apiClient.post(
       `/projects/${projectId}/chapters/${chapterId}/story-system/write`,
@@ -324,10 +358,38 @@ export const storySystemApi = {
     content: string
     instruction?: string
     repairPlanId?: string
+    templateId?: string
+    projectTemplateId?: string
+    chapterTemplateId?: string
   }): Promise<StoryRepairResult> {
     const response = await apiClient.post(
       `/projects/${projectId}/chapters/${chapterId}/story-system/repair`,
       data,
+    )
+    return response.data
+  },
+
+  async createAiJob(projectId: string, chapterId: string, data: {
+    type: 'WRITE_CHAPTER' | 'REPAIR_CHAPTER' | string
+    content?: string
+    instruction?: string
+    temperature?: number
+    maxTokens?: number
+    repairPlanId?: string
+    templateId?: string
+    projectTemplateId?: string
+    chapterTemplateId?: string
+  }): Promise<StoryAiJob> {
+    const response = await apiClient.post(
+      `/projects/${projectId}/chapters/${chapterId}/story-system/ai-jobs`,
+      data,
+    )
+    return response.data
+  },
+
+  async listAiJobs(projectId: string, chapterId: string): Promise<StoryAiJob[]> {
+    const response = await apiClient.get(
+      `/projects/${projectId}/chapters/${chapterId}/story-system/ai-jobs`,
     )
     return response.data
   },
@@ -457,7 +519,7 @@ export const storySystemApi = {
     return response.data
   },
 
-  async startRun(projectId: string, chapterId: string, data: { mode?: string; instruction?: string }): Promise<StoryAgentRun> {
+  async startRun(projectId: string, chapterId: string, data: { mode?: string; instruction?: string; templateId?: string; projectTemplateId?: string; chapterTemplateId?: string }): Promise<StoryAgentRun> {
     const response = await apiClient.post(
       `/projects/${projectId}/chapters/${chapterId}/story-system/agent-runs`,
       data,

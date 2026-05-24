@@ -1,10 +1,10 @@
 import { useState, useEffect } from 'react';
 import { useParams } from 'react-router-dom';
-import { 
-  Plus, 
-  Edit2, 
-  Trash2, 
-  ChevronRight, 
+import {
+  Plus,
+  Edit2,
+  Trash2,
+  ChevronRight,
   ChevronDown,
   FolderOpen,
   Sparkles,
@@ -14,15 +14,17 @@ import {
   Map,
   Users,
   Shield,
-  Crown
+  Crown,
+  Loader2
 } from 'lucide-react';
 import { Button } from '../components/ui/Button';
 import { Card } from '../components/ui/Card';
 import { Input } from '../components/ui/Input';
 import { Textarea } from '../components/ui/Textarea';
 import { Modal } from '../components/ui/Modal';
-import { worldSettingsApi } from '../api/world-settings';
-import type { WorldSetting, CreateWorldSettingDto, UpdateWorldSettingDto } from '../api/world-settings';
+import { worldSettingsApi, type WorldSetting } from '../api/world-settings';
+import { projectsApi } from '../api/projects';
+import { useToast } from '../contexts/ToastContext';
 
 interface WorldSettingItem {
   id?: string;
@@ -32,58 +34,58 @@ interface WorldSettingItem {
 }
 
 const PRESET_CATEGORIES = [
-  { 
-    id: 'geography', 
-    name: '地理环境', 
+  {
+    id: 'geography',
+    name: '地理环境',
     icon: Map,
     color: 'bg-green-500',
     items: ['大陆', '国家/地区', '城市/城镇', '特殊地点', '地形地貌']
   },
-  { 
-    id: 'politics', 
-    name: '政治体系', 
+  {
+    id: 'politics',
+    name: '政治体系',
     icon: Crown,
     color: 'bg-purple-500',
     items: ['政体类型', '统治阶级', '法律制度', '官僚机构', '外交关系']
   },
-  { 
-    id: 'magic', 
-    name: '魔法/科技', 
+  {
+    id: 'magic',
+    name: '魔法/科技',
     icon: Sparkles,
     color: 'bg-blue-500',
     items: ['力量来源', '使用规则', '限制条件', '历史演变', '社会影响']
   },
-  { 
-    id: 'history', 
-    name: '历史背景', 
+  {
+    id: 'history',
+    name: '历史背景',
     icon: Clock,
     color: 'bg-amber-500',
     items: ['创世传说', '重大事件', '黄金时代', '黑暗时代', '当代局势']
   },
-  { 
-    id: 'culture', 
-    name: '文化风俗', 
+  {
+    id: 'culture',
+    name: '文化风俗',
     icon: Globe,
     color: 'bg-pink-500',
     items: ['宗教信仰', '节日庆典', '饮食服饰', '艺术娱乐', '语言文字']
   },
-  { 
-    id: 'social', 
-    name: '社会结构', 
+  {
+    id: 'society',
+    name: '社会结构',
     icon: Users,
     color: 'bg-indigo-500',
     items: ['阶层划分', '职业群体', '家族宗族', '秘密组织', '民间势力']
   },
-  { 
-    id: 'economy', 
-    name: '经济体系', 
+  {
+    id: 'economy',
+    name: '经济体系',
     icon: Scale,
     color: 'bg-yellow-500',
     items: ['货币制度', '贸易路线', '主要产业', '商业势力', '贫富差距']
   },
-  { 
-    id: 'military', 
-    name: '军事力量', 
+  {
+    id: 'military',
+    name: '军事力量',
     icon: Shield,
     color: 'bg-red-500',
     items: ['军队类型', '武器装备', '战术战略', '情报系统', '战争历史']
@@ -92,6 +94,7 @@ const PRESET_CATEGORIES = [
 
 export function WorldSettings() {
   const { projectId } = useParams<{ projectId: string }>();
+  const { success, error } = useToast();
   const [settings, setSettings] = useState<WorldSetting[]>([]);
   const [categories, setCategories] = useState<Set<string>>(new Set());
   const [expandedCategories, setExpandedCategories] = useState<Set<string>>(new Set());
@@ -99,16 +102,12 @@ export function WorldSettings() {
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [modalMode, setModalMode] = useState<'create' | 'edit'>('create');
   const [isLoading, setIsLoading] = useState(true);
-  const [formData, setFormData] = useState<{
-    category: string;
-    name: string;
-    description: string;
-    items: WorldSettingItem[];
-  }>({
+  const [isGenerating, setIsGenerating] = useState<string | null>(null);
+  const [formData, setFormData] = useState({
     category: '',
     name: '',
     description: '',
-    items: [],
+    items: [] as WorldSettingItem[],
   });
 
   useEffect(() => {
@@ -117,14 +116,16 @@ export function WorldSettings() {
 
   const loadSettings = async () => {
     if (!projectId) return;
+    setIsLoading(true);
     try {
       const data = await worldSettingsApi.getAll(projectId);
       setSettings(data);
-      const cats = new Set(data.map(s => s.category));
+      const cats: Set<string> = new Set(data.map((s: WorldSetting) => s.category));
       setCategories(cats);
       setExpandedCategories(new Set(cats));
-    } catch (error) {
-      console.error('加载世界观设定失败:', error);
+    } catch (err) {
+      error('加载世界观设定失败');
+      console.error('加载世界观设定失败:', err);
     } finally {
       setIsLoading(false);
     }
@@ -148,11 +149,11 @@ export function WorldSettings() {
       category: setting.category,
       name: setting.name,
       description: setting.description || '',
-      items: setting.items?.map(item => ({
+      items: (setting.items || []).map(item => ({
         name: item.name,
         description: item.description,
         details: item.details,
-      })) || [],
+      })),
     });
     setIsModalOpen(true);
   };
@@ -162,16 +163,18 @@ export function WorldSettings() {
     try {
       await worldSettingsApi.delete(projectId, setting.id);
       await loadSettings();
-    } catch (error) {
-      console.error('删除失败:', error);
+      success('已删除设定');
+    } catch (err) {
+      error('删除失败');
+      console.error('删除失败:', err);
     }
   };
 
   const handleSubmit = async () => {
     if (!projectId || !formData.name.trim()) return;
-    
+
     try {
-      const dto: CreateWorldSettingDto | UpdateWorldSettingDto = {
+      const data = {
         category: formData.category,
         name: formData.name,
         description: formData.description,
@@ -179,15 +182,48 @@ export function WorldSettings() {
       };
 
       if (modalMode === 'create') {
-        await worldSettingsApi.create(projectId, dto as CreateWorldSettingDto);
+        await worldSettingsApi.create(projectId, data);
+        success('设定已创建');
       } else if (selectedSetting) {
-        await worldSettingsApi.update(projectId, selectedSetting.id, dto as UpdateWorldSettingDto);
+        await worldSettingsApi.update(projectId, selectedSetting.id, data);
+        success('设定已更新');
       }
 
       setIsModalOpen(false);
       await loadSettings();
-    } catch (error) {
-      console.error('保存失败:', error);
+    } catch (err) {
+      error('保存失败');
+      console.error('保存失败:', err);
+    }
+  };
+
+  const handleAiGenerateSettings = async () => {
+    if (!projectId) return;
+    setIsGenerating('all');
+    try {
+      await projectsApi.aiGenerateWorldSettings(projectId, 3);
+      await loadSettings();
+      success('AI 已生成 3 个世界观设定！');
+    } catch (err) {
+      error('AI 生成失败');
+      console.error('AI 生成失败:', err);
+    } finally {
+      setIsGenerating(null);
+    }
+  };
+
+  const handleAiExpandSetting = async (setting: WorldSetting) => {
+    if (!projectId) return;
+    setIsGenerating(setting.id);
+    try {
+      await projectsApi.aiExpandWorldSetting(projectId, setting.id);
+      await loadSettings();
+      success('设定已 AI 扩展！');
+    } catch (err) {
+      error('AI 扩展失败');
+      console.error('AI 扩展失败:', err);
+    } finally {
+      setIsGenerating(null);
     }
   };
 
@@ -198,7 +234,7 @@ export function WorldSettings() {
     });
   };
 
-  const updateItem = (index: number, field: 'name' | 'description', value: string) => {
+  const updateItem = (index: number, field: keyof WorldSettingItem, value: string) => {
     const newItems = [...formData.items];
     newItems[index] = { ...newItems[index], [field]: value };
     setFormData({ ...formData, items: newItems });
@@ -231,7 +267,7 @@ export function WorldSettings() {
 
   if (isLoading) {
     return (
-      <div className="p-8 flex items-center justify-center">
+      <div className="min-h-screen bg-gray-50 flex items-center justify-center p-8">
         <div className="text-gray-500">加载中...</div>
       </div>
     );
@@ -240,15 +276,29 @@ export function WorldSettings() {
   return (
     <div className="min-h-screen bg-gray-50 p-6">
       <div className="max-w-6xl mx-auto">
-        <div className="flex justify-between items-center mb-6">
+        <div className="flex items-center justify-between mb-6">
           <div>
             <h1 className="text-2xl font-bold text-gray-900">世界观设定</h1>
             <p className="text-gray-600 mt-1">构建你的故事世界，包括地理、政治、文化、魔法体系等</p>
           </div>
-          <Button onClick={() => handleCreate()}>
-            <Plus className="w-4 h-4 mr-2" />
-            添加设定
-          </Button>
+          <div className="flex gap-3">
+            <Button
+              variant="outline"
+              onClick={handleAiGenerateSettings}
+              disabled={!!isGenerating}
+            >
+              {isGenerating === 'all' ? (
+                <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+              ) : (
+                <Sparkles className="w-4 h-4 mr-2" />
+              )}
+              AI 生成设定
+            </Button>
+            <Button onClick={() => handleCreate()}>
+              <Plus className="w-4 h-4 mr-2" />
+              添加设定
+            </Button>
+          </div>
         </div>
 
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
@@ -258,7 +308,13 @@ export function WorldSettings() {
                 <FolderOpen className="w-12 h-12 mx-auto text-gray-400 mb-4" />
                 <h3 className="text-lg font-medium text-gray-900 mb-2">还没有世界观设定</h3>
                 <p className="text-gray-500 mb-4">开始构建你的故事世界吧</p>
-                <Button onClick={() => handleCreate()}>创建第一个设定</Button>
+                <div className="flex justify-center gap-3">
+                  <Button variant="outline" onClick={handleAiGenerateSettings}>
+                    <Sparkles className="w-4 h-4 mr-2" />
+                    AI 生成
+                  </Button>
+                  <Button onClick={() => handleCreate()}>创建第一个设定</Button>
+                </div>
               </Card>
             ) : (
               <>
@@ -273,13 +329,13 @@ export function WorldSettings() {
                     <Card key={preset.id} className="overflow-hidden">
                       <button
                         onClick={() => toggleCategory(preset.name)}
-                        className="w-full flex items-center justify-between p-4 hover:bg-gray-50 transition-colors"
+                        className="w-full flex items-center justify-between p-4 hover:bg-gray-50 transition-colors text-left"
                       >
                         <div className="flex items-center gap-3">
                           <div className={`p-2 rounded-lg ${preset.color}`}>
                             <Icon className="w-5 h-5 text-white" />
                           </div>
-                          <div className="text-left">
+                          <div>
                             <h3 className="font-semibold text-gray-900">{preset.name}</h3>
                             <p className="text-sm text-gray-500">{categorySettings.length} 个设定</p>
                           </div>
@@ -308,7 +364,7 @@ export function WorldSettings() {
                                   )}
                                   {setting.items && setting.items.length > 0 && (
                                     <div className="flex flex-wrap gap-2 mt-2">
-                                      {setting.items.slice(0, 3).map((item, i) => (
+                                      {setting.items.slice(0, 3).map((item: { name: string }, i: number) => (
                                         <span
                                           key={i}
                                           className="text-xs bg-gray-100 text-gray-600 px-2 py-1 rounded"
@@ -325,6 +381,18 @@ export function WorldSettings() {
                                   )}
                                 </div>
                                 <div className="flex gap-2 ml-4">
+                                  <Button
+                                    variant="ghost"
+                                    size="sm"
+                                    onClick={() => handleAiExpandSetting(setting)}
+                                    disabled={!!isGenerating}
+                                  >
+                                    {isGenerating === setting.id ? (
+                                      <Loader2 className="w-4 h-4 animate-spin" />
+                                    ) : (
+                                      <Sparkles className="w-4 h-4" />
+                                    )}
+                                  </Button>
                                   <button
                                     onClick={() => handleEdit(setting)}
                                     className="p-1 text-gray-400 hover:text-blue-600"
@@ -341,6 +409,17 @@ export function WorldSettings() {
                               </div>
                             </div>
                           ))}
+                          <div className="p-3 border-t border-gray-100">
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              onClick={() => handleCreate(preset.name)}
+                              className="w-full text-sm text-gray-500 hover:text-blue-600"
+                            >
+                              <Plus className="w-4 h-4 mr-2" />
+                              添加 {preset.name} 设定
+                            </Button>
+                          </div>
                         </div>
                       )}
                     </Card>
@@ -372,6 +451,18 @@ export function WorldSettings() {
                             )}
                           </div>
                           <div className="flex gap-2 ml-4">
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              onClick={() => handleAiExpandSetting(setting)}
+                              disabled={!!isGenerating}
+                            >
+                              {isGenerating === setting.id ? (
+                                <Loader2 className="w-4 h-4 animate-spin" />
+                              ) : (
+                                <Sparkles className="w-4 h-4" />
+                              )}
+                            </Button>
                             <button
                               onClick={() => handleEdit(setting)}
                               className="p-1 text-gray-400 hover:text-blue-600"
@@ -409,12 +500,12 @@ export function WorldSettings() {
                     <button
                       key={preset.id}
                       onClick={() => handleCreate(preset.name)}
-                      className="w-full flex items-center gap-3 p-3 rounded-lg hover:bg-gray-50 transition-colors"
+                      className="w-full flex items-center gap-3 p-3 rounded-lg hover:bg-gray-50 transition-colors text-left"
                     >
                       <div className={`p-2 rounded-lg ${preset.color}`}>
                         <Icon className="w-4 h-4 text-white" />
                       </div>
-                      <div className="flex-1 text-left">
+                      <div className="flex-1">
                         <div className="font-medium text-gray-900 text-sm">{preset.name}</div>
                         <div className="text-xs text-gray-500">{preset.items.length} 个子项</div>
                       </div>
@@ -454,6 +545,16 @@ export function WorldSettings() {
         isOpen={isModalOpen}
         onClose={() => setIsModalOpen(false)}
         title={modalMode === 'create' ? '创建世界观设定' : '编辑世界观设定'}
+        footer={
+          <div className="flex justify-end gap-3">
+            <Button variant="outline" onClick={() => setIsModalOpen(false)}>
+              取消
+            </Button>
+            <Button onClick={handleSubmit} disabled={!formData.name.trim()}>
+              {modalMode === 'create' ? '创建' : '保存'}
+            </Button>
+          </div>
+        }
       >
         <div className="space-y-4">
           <div>
@@ -492,28 +593,28 @@ export function WorldSettings() {
 
           <div>
             <div className="flex justify-between items-center mb-2">
-              <label className="text-sm font-medium text-gray-700">详细条目</label>
+              <label className="text-sm font-medium text-gray-700">详细子项</label>
               <Button variant="outline" size="sm" onClick={addItem}>
                 <Plus className="w-4 h-4 mr-1" />
-                添加条目
+                添加子项
               </Button>
             </div>
 
             {formData.items.length > 0 && (
               <div className="space-y-2">
-                {formData.items.map((item, index) => (
+                {formData.items.map((item: WorldSettingItem, index: number) => (
                   <div key={index} className="flex gap-2 items-start p-2 bg-gray-50 rounded-lg">
                     <div className="flex-1 space-y-2">
                       <Input
                         value={item.name}
                         onChange={(e) => updateItem(index, 'name', e.target.value)}
-                        placeholder="条目名称"
+                        placeholder="子项名称"
                         className="text-sm"
                       />
                       <Input
                         value={item.description || ''}
                         onChange={(e) => updateItem(index, 'description', e.target.value)}
-                        placeholder="条目描述（可选）"
+                        placeholder="子项描述（可选）"
                         className="text-sm"
                       />
                     </div>
@@ -530,18 +631,9 @@ export function WorldSettings() {
 
             {formData.items.length === 0 && (
               <div className="text-center py-4 text-gray-500 text-sm border-2 border-dashed border-gray-200 rounded-lg">
-                点击上方按钮添加详细条目
+                点击上方按钮添加详细子项
               </div>
             )}
-          </div>
-
-          <div className="flex justify-end gap-3 pt-4 border-t">
-            <Button variant="outline" onClick={() => setIsModalOpen(false)}>
-              取消
-            </Button>
-            <Button onClick={handleSubmit} disabled={!formData.name.trim()}>
-              {modalMode === 'create' ? '创建' : '保存'}
-            </Button>
           </div>
         </div>
       </Modal>
