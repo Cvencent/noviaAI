@@ -1,10 +1,13 @@
 import { Injectable } from '@nestjs/common'
+import { randomUUID } from 'crypto'
 import { PrismaService } from '../../prisma/prisma.service'
 import { AiService } from '../ai/ai.service'
 import { ProjectsService } from './projects.service'
 
 @Injectable()
 export class AiProjectGeneratorService {
+  private projectSuggestionJobTasks = new Set<Promise<void>>()
+
   constructor(
     private prisma: PrismaService,
     private aiService: AiService,
@@ -403,6 +406,138 @@ ${chaptersSummary}
     } catch (error) {
       throw new Error(`生成建议失败：${error.message}`)
     }
+  }
+
+  async createProjectSuggestionJob(userId: string, projectId: string) {
+    await this.ensureProjectAccess(userId, projectId)
+
+    const job = await this.createSuggestionJobRecord({
+      data: {
+        projectId,
+        status: 'RUNNING',
+        input: JSON.stringify({ userId, projectId }),
+        result: null,
+        error: null,
+      },
+    })
+
+    this.enqueueProjectSuggestionJob(userId, projectId, job.id)
+    return job
+  }
+
+  async listProjectSuggestionJobs(userId: string, projectId: string) {
+    await this.ensureProjectAccess(userId, projectId)
+
+    return this.findSuggestionJobRecords({
+      where: { projectId },
+      orderBy: { createdAt: 'desc' },
+      take: 10,
+    })
+  }
+
+  async waitForIdleProjectSuggestionJobs() {
+    await Promise.all([...this.projectSuggestionJobTasks])
+  }
+
+  private enqueueProjectSuggestionJob(userId: string, projectId: string, jobId: string) {
+    const task = this.runProjectSuggestionJob(userId, projectId, jobId)
+      .finally(() => {
+        this.projectSuggestionJobTasks.delete(task)
+      })
+    this.projectSuggestionJobTasks.add(task)
+  }
+
+  private async runProjectSuggestionJob(userId: string, projectId: string, jobId: string) {
+    try {
+      const suggestions = await this.generateProjectSuggestions(userId, projectId)
+      await this.updateSuggestionJobRecord({
+        where: { id: jobId },
+        data: {
+          status: 'DONE',
+          result: JSON.stringify(suggestions),
+          error: null,
+        },
+      })
+    } catch (error) {
+      await this.updateSuggestionJobRecord({
+        where: { id: jobId },
+        data: {
+          status: 'FAILED',
+          error: error instanceof Error ? error.message : 'AI 建议生成失败',
+        },
+      })
+    }
+  }
+
+  private async ensureProjectAccess(userId: string, projectId: string) {
+    const project = await this.prisma.project.findUnique({
+      where: { id: projectId },
+      select: { userId: true },
+    })
+
+    if (!project) {
+      throw new Error('项目不存在')
+    }
+    if (project.userId !== userId) {
+      throw new Error('没有权限访问此项目')
+    }
+  }
+
+  private async createSuggestionJobRecord(args: any) {
+    const delegate = (this.prisma as any).projectAiSuggestionJob
+    if (delegate) {
+      return delegate.create(args)
+    }
+
+    const id = randomUUID()
+    const now = new Date()
+    await this.prisma.$executeRaw`
+      INSERT INTO "ProjectAiSuggestionJob" ("id", "projectId", "status", "input", "result", "error", "updatedAt")
+      VALUES (${id}, ${args.data.projectId}, ${args.data.status}, ${args.data.input}, ${args.data.result}, ${args.data.error}, ${now})
+    `
+    return {
+      id,
+      projectId: args.data.projectId,
+      status: args.data.status,
+      input: args.data.input,
+      result: args.data.result,
+      error: args.data.error,
+      createdAt: now,
+      updatedAt: now,
+    }
+  }
+
+  private async findSuggestionJobRecords(args: any) {
+    const delegate = (this.prisma as any).projectAiSuggestionJob
+    if (delegate) {
+      return delegate.findMany(args)
+    }
+
+    return this.prisma.$queryRaw`
+      SELECT "id", "projectId", "status", "input", "result", "error", "createdAt", "updatedAt"
+      FROM "ProjectAiSuggestionJob"
+      WHERE "projectId" = ${args.where.projectId}
+      ORDER BY "createdAt" DESC
+      LIMIT ${args.take || 10}
+    `
+  }
+
+  private async updateSuggestionJobRecord(args: any) {
+    const delegate = (this.prisma as any).projectAiSuggestionJob
+    if (delegate) {
+      return delegate.update(args)
+    }
+
+    const now = new Date()
+    await this.prisma.$executeRaw`
+      UPDATE "ProjectAiSuggestionJob"
+      SET "status" = ${args.data.status},
+          "result" = ${args.data.result ?? null},
+          "error" = ${args.data.error ?? null},
+          "updatedAt" = ${now}
+      WHERE "id" = ${args.where.id}
+    `
+    return { id: args.where.id, ...args.data, updatedAt: now }
   }
 
   async generateChapterOutline(userId: string, projectId: string, chapterId?: string, content?: string): Promise<any> {

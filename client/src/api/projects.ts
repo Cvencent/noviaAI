@@ -7,6 +7,25 @@ import { apiClient } from './client'
 
 export type { Project, CreateProjectDto, UpdateProjectDto }
 
+export interface ProjectAiSuggestions {
+  nextSteps?: string[]
+  contentSuggestions?: string[]
+  characterSuggestions?: string[]
+  worldSuggestions?: string[]
+  plotSuggestions?: string[]
+}
+
+export interface ProjectAiSuggestionJob {
+  id: string
+  projectId: string
+  status: 'PENDING' | 'RUNNING' | 'DONE' | 'FAILED'
+  input: string
+  result?: string | null
+  error?: string | null
+  createdAt: string
+  updatedAt: string
+}
+
 export const projectsApi = {
   async getAll(): Promise<Project[]> {
     const response = await apiClient.get('/projects')
@@ -50,6 +69,16 @@ export const projectsApi = {
 
   async aiGetSuggestions(id: string): Promise<any> {
     const response = await apiClient.get(`/projects/${id}/ai-suggestions`)
+    return response.data
+  },
+
+  async createAiSuggestionJob(id: string): Promise<ProjectAiSuggestionJob> {
+    const response = await apiClient.post(`/projects/${id}/ai-suggestions/jobs`)
+    return response.data
+  },
+
+  async listAiSuggestionJobs(id: string): Promise<ProjectAiSuggestionJob[]> {
+    const response = await apiClient.get(`/projects/${id}/ai-suggestions/jobs`)
     return response.data
   },
 

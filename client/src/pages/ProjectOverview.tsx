@@ -15,10 +15,16 @@ import {
   Clock,
   AlertCircle,
   Loader2,
+  Check,
 } from 'lucide-react';
 import { Button } from '../components/ui/Button';
 import { Card } from '../components/ui/Card';
-import { projectsApi, type Project } from '../api/projects';
+import {
+  projectsApi,
+  type Project,
+  type ProjectAiSuggestionJob,
+  type ProjectAiSuggestions,
+} from '../api/projects';
 import { chaptersApi } from '../api/chapters';
 import { charactersApi } from '../api/characters';
 import { worldSettingsApi } from '../api/world-settings';
@@ -32,6 +38,36 @@ interface QuickAction {
   href: string;
 }
 
+type SuggestionGroupKey = keyof ProjectAiSuggestions;
+
+const suggestionGroups: Array<{
+  key: SuggestionGroupKey;
+  title: string;
+  applyLabel: string;
+}> = [
+  { key: 'nextSteps', title: '下一步行动建议', applyLabel: '生成章节草稿' },
+  { key: 'contentSuggestions', title: '内容建议', applyLabel: '生成章节草稿' },
+  { key: 'characterSuggestions', title: '角色相关建议', applyLabel: '创建人物草稿' },
+  { key: 'worldSuggestions', title: '世界观相关建议', applyLabel: '创建设定条目' },
+  { key: 'plotSuggestions', title: '剧情发展建议', applyLabel: '生成剧情规划' },
+];
+
+function parseSuggestionJobResult(job?: ProjectAiSuggestionJob | null): ProjectAiSuggestions | null {
+  if (!job?.result) return null;
+  try {
+    return JSON.parse(job.result) as ProjectAiSuggestions;
+  } catch {
+    return null;
+  }
+}
+
+function getSuggestionTitle(text: string, fallback: string) {
+  const quoted = text.match(/[“"「](.+?)[”"」]/)?.[1];
+  if (quoted) return quoted.slice(0, 40);
+  const cleaned = text.replace(/[。！？.!?].*$/, '').replace(/^(开始|为|制定|创建|扩展|设定|引入)/, '').trim();
+  return (cleaned || fallback).slice(0, 40);
+}
+
 export function ProjectOverview() {
   const { projectId } = useParams<{ projectId: string }>();
   const navigate = useNavigate();
@@ -42,11 +78,32 @@ export function ProjectOverview() {
   const [settings, setSettings] = useState<any[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [isGeneratingSuggestions, setIsGeneratingSuggestions] = useState(false);
-  const [aiSuggestions, setAiSuggestions] = useState<any>(null);
+  const [aiSuggestions, setAiSuggestions] = useState<ProjectAiSuggestions | null>(null);
+  const [aiSuggestionJob, setAiSuggestionJob] = useState<ProjectAiSuggestionJob | null>(null);
+  const [appliedSuggestions, setAppliedSuggestions] = useState<Record<string, boolean>>({});
+  const [applyingSuggestionKey, setApplyingSuggestionKey] = useState<string | null>(null);
 
   useEffect(() => {
     loadProjectData();
   }, [projectId]);
+
+  useEffect(() => {
+    refreshAiSuggestionJobs().catch((err) => {
+      console.error('加载 AI 建议任务失败:', err);
+    });
+  }, [projectId]);
+
+  useEffect(() => {
+    if (!aiSuggestionJob || !['PENDING', 'RUNNING'].includes(aiSuggestionJob.status)) return;
+
+    const timer = window.setInterval(() => {
+      refreshAiSuggestionJobs().catch((err) => {
+        console.error('刷新 AI 建议任务失败:', err);
+      });
+    }, 2500);
+
+    return () => window.clearInterval(timer);
+  }, [aiSuggestionJob, projectId]);
 
   const loadProjectData = async () => {
     if (!projectId) return;
@@ -74,14 +131,76 @@ export function ProjectOverview() {
     if (!projectId) return;
     setIsGeneratingSuggestions(true);
     try {
-      const suggestions = await projectsApi.aiGetSuggestions(projectId);
-      setAiSuggestions(suggestions);
-      success('AI 建议已生成！');
+      const job = await projectsApi.createAiSuggestionJob(projectId);
+      setAiSuggestionJob(job);
+      setAiSuggestions(null);
+      success('AI 建议任务已开始，离开页面也会继续生成');
     } catch (err) {
       error('加载 AI 建议失败');
       console.error('加载 AI 建议失败:', err);
-    } finally {
       setIsGeneratingSuggestions(false);
+    }
+  };
+
+  const refreshAiSuggestionJobs = async () => {
+    if (!projectId) return null;
+    const jobs = await projectsApi.listAiSuggestionJobs(projectId);
+    const latestJob = jobs[0] || null;
+    setAiSuggestionJob(latestJob);
+
+    if (!latestJob) {
+      setIsGeneratingSuggestions(false);
+      return null;
+    }
+
+    setIsGeneratingSuggestions(['PENDING', 'RUNNING'].includes(latestJob.status));
+
+    if (latestJob.status === 'DONE') {
+      const result = parseSuggestionJobResult(latestJob);
+      setAiSuggestions(result);
+    } else if (latestJob.status === 'FAILED') {
+      error(latestJob.error || 'AI 建议生成失败');
+    }
+
+    return latestJob;
+  };
+
+  const applySuggestion = async (group: SuggestionGroupKey, suggestion: string, index: number) => {
+    if (!projectId) return;
+
+    const key = `${group}-${index}-${suggestion}`;
+    setApplyingSuggestionKey(key);
+    try {
+      if (group === 'characterSuggestions') {
+        await charactersApi.create(projectId, {
+          name: getSuggestionTitle(suggestion, `建议人物 ${characters.length + 1}`),
+          role: '待完善',
+          notes: suggestion,
+        });
+        success('已创建人物草稿');
+      } else if (group === 'worldSuggestions') {
+        await worldSettingsApi.create(projectId, {
+          category: 'AI 建议',
+          name: getSuggestionTitle(suggestion, `设定 ${settings.length + 1}`),
+          description: suggestion,
+        });
+        success('已创建世界观设定');
+      } else {
+        await chaptersApi.create(projectId, {
+          title: getSuggestionTitle(suggestion, group === 'plotSuggestions' ? '剧情规划' : 'AI 建议章节'),
+          summary: suggestion,
+          status: 'DRAFT',
+        });
+        success(group === 'plotSuggestions' ? '已创建剧情规划章节' : '已创建章节草稿');
+      }
+
+      setAppliedSuggestions((current) => ({ ...current, [key]: true }));
+      await loadProjectData();
+    } catch (err) {
+      error('应用 AI 建议失败');
+      console.error('应用 AI 建议失败:', err);
+    } finally {
+      setApplyingSuggestionKey(null);
     }
   };
 
@@ -166,7 +285,7 @@ export function ProjectOverview() {
               ) : (
                 <Sparkles className="w-4 h-4 mr-2" />
               )}
-              AI 建议
+              {isGeneratingSuggestions ? 'AI 建议生成中' : 'AI 建议'}
             </Button>
           </div>
         </div>
@@ -232,82 +351,83 @@ export function ProjectOverview() {
 
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
           <div className="lg:col-span-2 space-y-6">
-            {aiSuggestions && (
+            {(isGeneratingSuggestions || aiSuggestions || aiSuggestionJob?.status === 'FAILED') && (
               <Card>
                 <div className="p-6">
-                  <div className="flex items-center gap-2 mb-4">
-                    <Lightbulb className="w-5 h-5 text-yellow-500" />
-                    <h3 className="text-lg font-semibold text-gray-900">AI 创作建议</h3>
+                  <div className="flex items-center justify-between gap-3 mb-4">
+                    <div className="flex items-center gap-2">
+                      <Lightbulb className="w-5 h-5 text-yellow-500" />
+                      <h3 className="text-lg font-semibold text-gray-900">AI 创作建议</h3>
+                    </div>
+                    {isGeneratingSuggestions && (
+                      <div className="flex items-center gap-2 text-sm text-blue-600">
+                        <Loader2 className="w-4 h-4 animate-spin" />
+                        后台生成中
+                      </div>
+                    )}
                   </div>
 
-                  {aiSuggestions.nextSteps && aiSuggestions.nextSteps.length > 0 && (
-                    <div className="mb-4">
-                        <h4 className="font-medium text-gray-800 mb-2">下一步行动建议</h4>
-                        <div className="space-y-2">
-                          {aiSuggestions.nextSteps.map((step: string, index: number) => (
-                            <div key={index} className="p-3 bg-blue-50 rounded-lg text-sm text-gray-700 flex items-start gap-2">
-                              <CheckCircle className="w-4 h-4 text-blue-600 flex-shrink-0 mt-0.5" />
-                              {step}
+                  {aiSuggestionJob?.status === 'FAILED' && (
+                    <div className="rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-700">
+                      {aiSuggestionJob.error || 'AI 建议生成失败'}
+                    </div>
+                  )}
+
+                  {isGeneratingSuggestions && !aiSuggestions && (
+                    <div className="rounded-lg border border-blue-100 bg-blue-50 p-4 text-sm text-blue-700">
+                      生成任务已保存。刷新或离开后回到此页面，会继续显示当前任务状态。
+                    </div>
+                  )}
+
+                  {aiSuggestions && (
+                    <div className="space-y-4">
+                      {suggestionGroups.map((group) => {
+                        const items = aiSuggestions[group.key] || [];
+                        if (!items.length) return null;
+
+                        return (
+                          <div key={group.key}>
+                            <h4 className="font-medium text-gray-800 mb-2">{group.title}</h4>
+                            <div className="space-y-2">
+                              {items.map((suggestion, index) => {
+                                const key = `${group.key}-${index}-${suggestion}`;
+                                const isApplied = !!appliedSuggestions[key];
+                                return (
+                                  <div
+                                    key={key}
+                                    className={`p-3 rounded-lg text-sm text-gray-700 flex items-start justify-between gap-3 ${
+                                      group.key === 'nextSteps' ? 'bg-blue-50' : 'bg-gray-50'
+                                    }`}
+                                  >
+                                    <div className="flex items-start gap-2">
+                                      <CheckCircle className="w-4 h-4 text-blue-600 flex-shrink-0 mt-0.5" />
+                                      <span>{suggestion}</span>
+                                    </div>
+                                    <Button
+                                      variant={isApplied ? 'ghost' : 'outline'}
+                                      size="sm"
+                                      onClick={() => applySuggestion(group.key, suggestion, index)}
+                                      disabled={isApplied || applyingSuggestionKey === key}
+                                      className="shrink-0"
+                                    >
+                                      {applyingSuggestionKey === key ? (
+                                        <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                                      ) : isApplied ? (
+                                        <Check className="w-4 h-4 mr-2" />
+                                      ) : (
+                                        <Sparkles className="w-4 h-4 mr-2" />
+                                      )}
+                                      {isApplied ? '已应用' : group.applyLabel}
+                                    </Button>
+                                  </div>
+                                );
+                              })}
                             </div>
-                          ))}
-                        </div>
-                      </div>
-                    )}
-
-
-                  <div className="grid grid-cols-1 gap-4">
-                    {aiSuggestions.contentSuggestions && aiSuggestions.contentSuggestions.length > 0 && (
-                      <div>
-                        <h4 className="font-medium text-gray-800 mb-2">内容建议</h4>
-                        <div className="space-y-1">
-                          {aiSuggestions.contentSuggestions.map((suggestion: string, index: number) => (
-                          <div key={index} className="p-2 bg-gray-50 rounded text-sm text-gray-600">
-                            {suggestion}
                           </div>
-                        ))}
-                        </div>
-                      </div>
-                    )}
-
-                    {aiSuggestions.characterSuggestions && aiSuggestions.characterSuggestions.length > 0 && (
-                      <div>
-                        <h4 className="font-medium text-gray-800 mb-2">角色相关建议</h4>
-                        <div className="space-y-1">
-                          {aiSuggestions.characterSuggestions.map((suggestion: string, index: number) => (
-                          <div key={index} className="p-2 bg-gray-50 rounded text-sm text-gray-600">
-                            {suggestion}
-                          </div>
-                        ))}
-                        </div>
-                      </div>
-                    )}
-                  </div>
-
-                  {aiSuggestions.worldSuggestions && aiSuggestions.worldSuggestions.length > 0 && (
-                    <div className="mt-4">
-                        <h4 className="font-medium text-gray-800 mb-2">世界观相关建议</h4>
-                        <div className="space-y-1">
-                          {aiSuggestions.worldSuggestions.map((suggestion: string, index: number) => (
-                          <div key={index} className="p-2 bg-gray-50 rounded text-sm text-gray-600">
-                            {suggestion}
-                          </div>
-                        ))}
-                        </div>
-                      </div>
-                    )}
-
-                    {aiSuggestions.plotSuggestions && aiSuggestions.plotSuggestions.length > 0 && (
-                    <div className="mt-4">
-                        <h4 className="font-medium text-gray-800 mb-2">剧情发展建议</h4>
-                        <div className="space-y-1">
-                          {aiSuggestions.plotSuggestions.map((suggestion: string, index: number) => (
-                          <div key={index} className="p-2 bg-gray-50 rounded text-sm text-gray-600">
-                            {suggestion}
-                          </div>
-                        ))}
-                        </div>
-                      </div>
-                    )}
+                        );
+                      })}
+                    </div>
+                  )}
                   </div>
               </Card>
             )}

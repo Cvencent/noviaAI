@@ -56,6 +56,16 @@ export class ProjectsController {
     return this.aiProjectGeneratorService.generateProjectSuggestions(user.id, projectId)
   }
 
+  @Post(':id/ai-suggestions/jobs')
+  async createAiSuggestionJob(@CurrentUser() user: any, @Param('id') projectId: string) {
+    return this.aiProjectGeneratorService.createProjectSuggestionJob(user.id, projectId)
+  }
+
+  @Get(':id/ai-suggestions/jobs')
+  async listAiSuggestionJobs(@CurrentUser() user: any, @Param('id') projectId: string) {
+    return this.aiProjectGeneratorService.listProjectSuggestionJobs(user.id, projectId)
+  }
+
   @Post(':id/ai-chapter-outline')
   async aiGenerateChapterOutline(
     @CurrentUser() user: any,
