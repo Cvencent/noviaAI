@@ -1,4 +1,5 @@
 import { BadRequestException, Injectable, NotFoundException, ForbiddenException } from '@nestjs/common'
+import { randomUUID } from 'crypto'
 import { PrismaService } from '../../prisma/prisma.service'
 import { AiService } from '../ai/ai.service'
 import { AIAction } from '../ai-config/dto/create-ai-config.dto'
@@ -34,6 +35,8 @@ export interface StructureHealthReport {
 
 @Injectable()
 export class OutlinesService {
+  private outlineAiJobTasks = new Set<Promise<void>>()
+
   constructor(
     private prisma: PrismaService,
     private aiService: AiService,
@@ -172,6 +175,34 @@ export class OutlinesService {
         },
       },
     })
+  }
+
+  async createOutlineAiJob(userId: string, projectId: string, generateOutlineDto: GenerateOutlineDto) {
+    await this.loadProject(userId, projectId)
+    const job = await this.createOutlineAiJobRecord({
+      data: {
+        projectId,
+        status: 'RUNNING',
+        input: JSON.stringify(generateOutlineDto || {}),
+        result: null,
+        error: null,
+      },
+    })
+    this.enqueueOutlineAiJob(userId, projectId, job.id, generateOutlineDto || {})
+    return job
+  }
+
+  async listOutlineAiJobs(userId: string, projectId: string) {
+    await this.loadProject(userId, projectId)
+    return this.findOutlineAiJobRecords({
+      where: { projectId },
+      orderBy: { createdAt: 'desc' },
+      take: 10,
+    })
+  }
+
+  async waitForIdleOutlineAiJobs() {
+    await Promise.all([...this.outlineAiJobTasks])
   }
 
   async findOne(userId: string, projectId: string, outlineId: string) {
@@ -484,6 +515,109 @@ export class OutlinesService {
 2. 每个条目都要有明确 goal、conflict、outcome。
 3. estimatedWords 加总尽量接近 ${options.targetWords}。
 4. 结构要符合${this.getTemplateLabel(options.structureTemplate)}，包含开端、推进、转折、高潮和回收。`
+  }
+
+  private async loadProject(userId: string, projectId: string) {
+    const project = await this.prisma.project.findUnique({
+      where: { id: projectId },
+    })
+
+    if (!project) {
+      throw new NotFoundException('项目不存在')
+    }
+    if (project.userId !== userId) {
+      throw new ForbiddenException('没有权限访问此项目')
+    }
+    return project
+  }
+
+  private enqueueOutlineAiJob(
+    userId: string,
+    projectId: string,
+    jobId: string,
+    input: GenerateOutlineDto,
+  ) {
+    const task = this.runOutlineAiJob(userId, projectId, jobId, input)
+      .catch(() => undefined)
+      .finally(() => {
+        this.outlineAiJobTasks.delete(task)
+      })
+    this.outlineAiJobTasks.add(task)
+  }
+
+  private async runOutlineAiJob(
+    userId: string,
+    projectId: string,
+    jobId: string,
+    input: GenerateOutlineDto,
+  ) {
+    try {
+      const outline = await this.generateWithAi(userId, projectId, input)
+      await this.updateOutlineAiJobRecord({
+        where: { id: jobId },
+        data: {
+          status: 'DONE',
+          result: JSON.stringify({ outline }),
+          error: null,
+        },
+      })
+    } catch (error: any) {
+      await this.updateOutlineAiJobRecord({
+        where: { id: jobId },
+        data: {
+          status: 'FAILED',
+          error: error?.message || 'AI 大纲任务失败',
+        },
+      })
+    }
+  }
+
+  private async createOutlineAiJobRecord(args: any) {
+    const delegate = (this.prisma as any).outlineAiJob
+    if (delegate) {
+      return delegate.create(args)
+    }
+
+    const id = randomUUID()
+    const now = new Date()
+    await this.prisma.$executeRaw`
+      INSERT INTO "OutlineAiJob" ("id", "projectId", "status", "input", "result", "error", "updatedAt")
+      VALUES (${id}, ${args.data.projectId}, ${args.data.status}, ${args.data.input}, ${args.data.result}, ${args.data.error}, ${now})
+    `
+    return { id, ...args.data, createdAt: now, updatedAt: now }
+  }
+
+  private async findOutlineAiJobRecords(args: any) {
+    const delegate = (this.prisma as any).outlineAiJob
+    if (delegate) {
+      return delegate.findMany(args)
+    }
+
+    return this.prisma.$queryRaw`
+      SELECT "id", "projectId", "status", "input", "result", "error", "createdAt", "updatedAt"
+      FROM "OutlineAiJob"
+      WHERE "projectId" = ${args.where.projectId}
+      ORDER BY "createdAt" DESC
+      LIMIT ${args.take || 10}
+    `
+  }
+
+  private async updateOutlineAiJobRecord(args: any) {
+    const delegate = (this.prisma as any).outlineAiJob
+    if (delegate) {
+      return delegate.update(args)
+    }
+
+    const now = new Date()
+    await this.prisma.$executeRaw`
+      UPDATE "OutlineAiJob"
+      SET "status" = ${args.data.status},
+          "result" = ${args.data.result ?? null},
+          "error" = ${args.data.error ?? null},
+          "updatedAt" = ${now}
+      WHERE "id" = ${args.where.id}
+    `
+    return { id: args.where.id, ...args.data, updatedAt: now }
   }
 
   private parseGeneratedOutline(response: string): {

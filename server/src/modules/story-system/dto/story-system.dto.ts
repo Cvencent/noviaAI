@@ -216,6 +216,14 @@ export class FullBookAiReviewDto {
   focus?: 'ALL' | 'STRUCTURE' | 'STYLE' | string
 }
 
+export class CreateProjectStoryAiJobDto {
+  @IsString()
+  type!: 'FULL_BOOK_AI_REVIEW' | 'PUBLISHING_ASSETS' | string
+
+  @IsOptional()
+  input?: FullBookAiReviewDto | GeneratePublishingAssetsDto | Record<string, unknown>
+}
+
 export class CreateProjectionJobDto {
   @IsString()
   @IsOptional()

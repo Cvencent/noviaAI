@@ -48,6 +48,20 @@ export class OutlinesController {
     return this.outlinesService.generateWithAi(user.id, projectId, generateOutlineDto)
   }
 
+  @Post('ai-jobs')
+  async createAiJob(
+    @CurrentUser() user: any,
+    @Param('projectId') projectId: string,
+    @Body() generateOutlineDto: GenerateOutlineDto,
+  ) {
+    return this.outlinesService.createOutlineAiJob(user.id, projectId, generateOutlineDto)
+  }
+
+  @Get('ai-jobs')
+  async listAiJobs(@CurrentUser() user: any, @Param('projectId') projectId: string) {
+    return this.outlinesService.listOutlineAiJobs(user.id, projectId)
+  }
+
   @Get(':id')
   async findOne(
     @CurrentUser() user: any,

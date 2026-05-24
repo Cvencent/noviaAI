@@ -83,6 +83,8 @@ model Project {
   projectionJobs          ProjectionJob[]
   storyAiJobs             StoryAiJob[]
   projectAiSuggestionJobs ProjectAiSuggestionJob[]
+  projectStoryAiJobs      ProjectStoryAiJob[]
+  outlineAiJobs           OutlineAiJob[]
 
   // 写作风格配置
   currentWritingStyleId String?
@@ -289,6 +291,40 @@ model StoryAiJob {
 }
 
 model ProjectAiSuggestionJob {
+  id        String   @id @default(uuid())
+  projectId String
+  status    String   @default("PENDING")
+  input     String
+  result    String?
+  error     String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  project   Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  @@index([projectId])
+  @@index([status])
+  @@index([createdAt])
+}
+
+model ProjectStoryAiJob {
+  id        String   @id @default(uuid())
+  projectId String
+  type      String
+  status    String   @default("PENDING")
+  input     String
+  result    String?
+  error     String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  project   Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  @@index([projectId])
+  @@index([type])
+  @@index([status])
+  @@index([createdAt])
+}
+
+model OutlineAiJob {
   id        String   @id @default(uuid())
   projectId String
   status    String   @default("PENDING")

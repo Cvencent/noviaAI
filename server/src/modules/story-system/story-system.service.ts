@@ -4,6 +4,7 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common'
+import { randomUUID } from 'crypto'
 import JSZip = require('jszip')
 import PDFDocument = require('pdfkit')
 import { PrismaService } from '../../prisma/prisma.service'
@@ -28,6 +29,7 @@ import {
 
 type ContractType = 'MASTER_SETTING' | 'VOLUME_BRIEF' | 'CHAPTER_BRIEF' | 'REVIEW_CONTRACT'
 type StoryAiJobType = 'WRITE_CHAPTER' | 'REPAIR_CHAPTER'
+type ProjectStoryAiJobType = 'FULL_BOOK_AI_REVIEW' | 'PUBLISHING_ASSETS'
 
 const REQUIRED_CONTRACTS: ContractType[] = [
   'MASTER_SETTING',
@@ -47,6 +49,7 @@ const STEP_ORDER: StoryAgentStepType[] = [
 @Injectable()
 export class StorySystemService {
   private storyAiJobTasks = new Set<Promise<void>>()
+  private projectStoryAiJobTasks = new Set<Promise<void>>()
 
   constructor(
     private prisma: PrismaService,
@@ -469,11 +472,53 @@ ${dto.content}`
     await Promise.all([...this.storyAiJobTasks])
   }
 
+  async createProjectStoryAiJob(
+    userId: string,
+    projectId: string,
+    dto: { type: ProjectStoryAiJobType | string; input?: FullBookAiReviewDto | GeneratePublishingAssetsDto | Record<string, unknown> },
+  ) {
+    await this.loadProject(userId, projectId)
+    const type = this.normalizeProjectStoryAiJobType(dto.type)
+    const input = (dto.input || {}) as Record<string, unknown>
+    const job = await this.createProjectStoryAiJobRecord({
+      data: {
+        projectId,
+        type,
+        status: 'RUNNING',
+        input: JSON.stringify(input),
+        result: null,
+        error: null,
+      },
+    })
+    this.enqueueProjectStoryAiJob(userId, projectId, job.id, type, input)
+    return job
+  }
+
+  async listProjectStoryAiJobs(userId: string, projectId: string) {
+    await this.loadProject(userId, projectId)
+    return this.findProjectStoryAiJobRecords({
+      where: { projectId },
+      orderBy: { createdAt: 'desc' },
+      take: 10,
+    })
+  }
+
+  async waitForIdleProjectStoryAiJobs() {
+    await Promise.all([...this.projectStoryAiJobTasks])
+  }
+
   private normalizeStoryAiJobType(type?: string): StoryAiJobType {
     if (type === 'WRITE_CHAPTER' || type === 'REPAIR_CHAPTER') {
       return type
     }
     throw new BadRequestException('不支持的 Story AI 任务类型')
+  }
+
+  private normalizeProjectStoryAiJobType(type?: string): ProjectStoryAiJobType {
+    if (type === 'FULL_BOOK_AI_REVIEW' || type === 'PUBLISHING_ASSETS') {
+      return type
+    }
+    throw new BadRequestException('不支持的项目 AI 任务类型')
   }
 
   private enqueueStoryAiJob(
@@ -537,6 +582,100 @@ ${dto.content}`
         },
       })
     }
+  }
+
+  private enqueueProjectStoryAiJob(
+    userId: string,
+    projectId: string,
+    jobId: string,
+    type: ProjectStoryAiJobType,
+    input: Record<string, unknown>,
+  ) {
+    const task = this.runProjectStoryAiJob(userId, projectId, jobId, type, input)
+      .catch(() => undefined)
+      .finally(() => {
+        this.projectStoryAiJobTasks.delete(task)
+      })
+    this.projectStoryAiJobTasks.add(task)
+  }
+
+  private async runProjectStoryAiJob(
+    userId: string,
+    projectId: string,
+    jobId: string,
+    type: ProjectStoryAiJobType,
+    input: Record<string, unknown>,
+  ) {
+    try {
+      const result = type === 'PUBLISHING_ASSETS'
+        ? await this.generatePublishingAssets(userId, projectId, input as GeneratePublishingAssetsDto)
+        : await this.reviewFullBookWithAi(userId, projectId, input as FullBookAiReviewDto)
+
+      await this.updateProjectStoryAiJobRecord({
+        where: { id: jobId },
+        data: {
+          status: 'DONE',
+          result: JSON.stringify(result),
+          error: null,
+        },
+      })
+    } catch (error: any) {
+      await this.updateProjectStoryAiJobRecord({
+        where: { id: jobId },
+        data: {
+          status: 'FAILED',
+          error: error?.message || '项目 AI 任务失败',
+        },
+      })
+    }
+  }
+
+  private async createProjectStoryAiJobRecord(args: any) {
+    const delegate = (this.prisma as any).projectStoryAiJob
+    if (delegate) {
+      return delegate.create(args)
+    }
+
+    const id = randomUUID()
+    const now = new Date()
+    await this.prisma.$executeRaw`
+      INSERT INTO "ProjectStoryAiJob" ("id", "projectId", "type", "status", "input", "result", "error", "updatedAt")
+      VALUES (${id}, ${args.data.projectId}, ${args.data.type}, ${args.data.status}, ${args.data.input}, ${args.data.result}, ${args.data.error}, ${now})
+    `
+    return { id, ...args.data, createdAt: now, updatedAt: now }
+  }
+
+  private async findProjectStoryAiJobRecords(args: any) {
+    const delegate = (this.prisma as any).projectStoryAiJob
+    if (delegate) {
+      return delegate.findMany(args)
+    }
+
+    return this.prisma.$queryRaw`
+      SELECT "id", "projectId", "type", "status", "input", "result", "error", "createdAt", "updatedAt"
+      FROM "ProjectStoryAiJob"
+      WHERE "projectId" = ${args.where.projectId}
+      ORDER BY "createdAt" DESC
+      LIMIT ${args.take || 10}
+    `
+  }
+
+  private async updateProjectStoryAiJobRecord(args: any) {
+    const delegate = (this.prisma as any).projectStoryAiJob
+    if (delegate) {
+      return delegate.update(args)
+    }
+
+    const now = new Date()
+    await this.prisma.$executeRaw`
+      UPDATE "ProjectStoryAiJob"
+      SET "status" = ${args.data.status},
+          "result" = ${args.data.result ?? null},
+          "error" = ${args.data.error ?? null},
+          "updatedAt" = ${now}
+      WHERE "id" = ${args.where.id}
+    `
+    return { id: args.where.id, ...args.data, updatedAt: now }
   }
 
   async startAgentRun(

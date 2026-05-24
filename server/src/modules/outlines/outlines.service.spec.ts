@@ -16,6 +16,11 @@ describe('OutlinesService AI structure tools', () => {
         create: jest.fn(),
         findUnique: jest.fn(),
       },
+      outlineAiJob: {
+        create: jest.fn(),
+        findMany: jest.fn(),
+        update: jest.fn(),
+      },
     }
 
     aiService = {
@@ -176,5 +181,73 @@ describe('OutlinesService AI structure tools', () => {
     await expect(
       service.analyzeStructure('user-1', 'project-1', 'outline-404'),
     ).rejects.toBeInstanceOf(NotFoundException)
+  })
+
+  it('creates a resumable AI outline job and stores the generated outline result', async () => {
+    prisma.project.findUnique.mockResolvedValue({
+      id: 'project-1',
+      userId: 'user-1',
+      title: '雨城',
+      genre: 'mystery',
+      synopsis: '雨夜连环案与记忆交易。',
+    })
+    prisma.outlineAiJob.create.mockImplementation(({ data }: any) => Promise.resolve({
+      id: 'outline-ai-job-1',
+      ...data,
+      createdAt: new Date('2026-05-24T00:00:00.000Z'),
+      updatedAt: new Date('2026-05-24T00:00:00.000Z'),
+    }))
+    prisma.outlineAiJob.update.mockImplementation(({ data }: any) => Promise.resolve({ id: 'outline-ai-job-1', ...data }))
+    prisma.outline.findFirst.mockResolvedValue({ order: 0 })
+    prisma.outline.create.mockResolvedValue({
+      id: 'outline-2',
+      projectId: 'project-1',
+      title: '三幕式大纲',
+      items: [{ id: 'item-1', title: '雨夜开局' }],
+    })
+    aiService.chat.mockResolvedValue({
+      response: JSON.stringify({
+        title: '三幕式大纲',
+        description: '围绕雨夜案件展开。',
+        items: [{ title: '雨夜开局', summary: '发现尸体', goal: '抛钩子', conflict: '警方封锁', outcome: '拿到芯片' }],
+      }),
+    })
+
+    const job = await service.createOutlineAiJob('user-1', 'project-1', {
+      structureTemplate: 'THREE_ACT',
+      chapterCount: 1,
+      targetWords: 3000,
+    })
+    await service.waitForIdleOutlineAiJobs()
+
+    expect(job).toEqual(expect.objectContaining({
+      id: 'outline-ai-job-1',
+      status: 'RUNNING',
+    }))
+    expect(prisma.outlineAiJob.update).toHaveBeenCalledWith({
+      where: { id: 'outline-ai-job-1' },
+      data: expect.objectContaining({
+        status: 'DONE',
+        result: expect.stringContaining('outline-2'),
+        error: null,
+      }),
+    })
+  })
+
+  it('lists AI outline jobs newest first', async () => {
+    prisma.project.findUnique.mockResolvedValue({ id: 'project-1', userId: 'user-1' })
+    prisma.outlineAiJob.findMany.mockResolvedValue([
+      { id: 'outline-ai-job-2', projectId: 'project-1', status: 'DONE', input: '{}', result: '{}' },
+      { id: 'outline-ai-job-1', projectId: 'project-1', status: 'RUNNING', input: '{}', result: null },
+    ])
+
+    const jobs = await service.listOutlineAiJobs('user-1', 'project-1')
+
+    expect(jobs).toHaveLength(2)
+    expect(prisma.outlineAiJob.findMany).toHaveBeenCalledWith({
+      where: { projectId: 'project-1' },
+      orderBy: { createdAt: 'desc' },
+      take: 10,
+    })
   })
 })

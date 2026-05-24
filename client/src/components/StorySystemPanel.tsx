@@ -19,6 +19,7 @@ import {
   FullBookAiReview,
   OpenLoop,
   ProjectionJob,
+  ProjectStoryAiJob,
   PublishChecklist,
   RepairPlan,
   ReviewIssue,
@@ -84,6 +85,15 @@ function parseJobResult<T>(job?: StoryAiJob | null): T | null {
   }
 }
 
+function parseProjectJobResult<T>(job?: ProjectStoryAiJob | null): T | null {
+  if (!job?.result) return null
+  try {
+    return JSON.parse(job.result) as T
+  } catch {
+    return null
+  }
+}
+
 export function StorySystemPanel({
   projectId,
   chapterId,
@@ -107,6 +117,7 @@ export function StorySystemPanel({
   const [fullBookAiReview, setFullBookAiReview] = useState<FullBookAiReview | null>(null)
   const [projectionJobs, setProjectionJobs] = useState<ProjectionJob[]>([])
   const [aiJobs, setAiJobs] = useState<StoryAiJob[]>([])
+  const [projectAiJobs, setProjectAiJobs] = useState<ProjectStoryAiJob[]>([])
   const [activeTab, setActiveTab] = useState<StoryPanelTab>('overview')
   const [run, setRun] = useState<StoryAgentRun | null>(null)
   const [instruction, setInstruction] = useState('')
@@ -128,6 +139,8 @@ export function StorySystemPanel({
   const activeRepairJob = aiJobs.find((job) => job.type === 'REPAIR_CHAPTER' && ['PENDING', 'RUNNING'].includes(job.status))
   const latestRepairJob = aiJobs.find((job) => job.type === 'REPAIR_CHAPTER')
   const repairJobResult = parseJobResult<StoryRepairResult>(latestRepairJob)
+  const activeFullBookAiReviewJob = projectAiJobs.find((job) => job.type === 'FULL_BOOK_AI_REVIEW' && ['PENDING', 'RUNNING'].includes(job.status))
+  const latestFullBookAiReviewJob = projectAiJobs.find((job) => job.type === 'FULL_BOOK_AI_REVIEW')
   const runDraft = useMemo(() => {
     const draft = run?.steps?.find((step) => step.stepType === 'DRAFT')
     const payload = parseJson(draft?.output)
@@ -139,15 +152,15 @@ export function StorySystemPanel({
   }, [projectId, chapterId])
 
   useEffect(() => {
-    if (!activeRepairJob) return
+    if (!activeRepairJob && !activeFullBookAiReviewJob) return
     const timer = window.setInterval(() => {
       loadStatus().catch(() => undefined)
     }, 2500)
     return () => window.clearInterval(timer)
-  }, [activeRepairJob?.id])
+  }, [activeRepairJob?.id, activeFullBookAiReviewJob?.id])
 
   const loadStatus = async () => {
-    const [healthData, commitData, reportData, repairData, loopData, factData, entityData, checklistData, projectionJobData, aiJobData] = await Promise.all([
+    const [healthData, commitData, reportData, repairData, loopData, factData, entityData, checklistData, projectionJobData, aiJobData, projectAiJobData] = await Promise.all([
       storySystemApi.health(projectId, chapterId).catch(() => null),
       storySystemApi.listCommits(projectId, chapterId).catch(() => []),
       storySystemApi.listReviewReports(projectId, chapterId).catch(() => []),
@@ -158,6 +171,7 @@ export function StorySystemPanel({
       storySystemApi.getPublishChecklist(projectId).catch(() => null),
       storySystemApi.listProjectionJobs(projectId).catch(() => []),
       storySystemApi.listAiJobs(projectId, chapterId).catch(() => []),
+      storySystemApi.listProjectAiJobs(projectId).catch(() => []),
     ])
     setHealth(healthData)
     setCommits(commitData)
@@ -169,11 +183,17 @@ export function StorySystemPanel({
     setPublishChecklist(checklistData)
     setProjectionJobs(projectionJobData)
     setAiJobs(aiJobData)
+    setProjectAiJobs(projectAiJobData)
     const latestRepair = aiJobData.find((job) => job.type === 'REPAIR_CHAPTER')
     const result = parseJobResult<StoryRepairResult>(latestRepair)
     if (latestRepair?.status === 'DONE' && result?.repairedText) {
       setRepairPreview(result.repairedText)
       setActiveRepairPlanId(result.repairPlanId)
+    }
+    const latestFullBookReview = projectAiJobData.find((job) => job.type === 'FULL_BOOK_AI_REVIEW')
+    const fullBookReviewResult = parseProjectJobResult<FullBookAiReview>(latestFullBookReview)
+    if (latestFullBookReview?.status === 'DONE' && fullBookReviewResult) {
+      setFullBookAiReview(fullBookReviewResult)
     }
   }
 
@@ -322,8 +342,13 @@ export function StorySystemPanel({
   })
 
   const runFullBookAiReview = () => runAction('Full-book AI review', async () => {
-    setFullBookAiReview(await storySystemApi.reviewFullBookWithAi(projectId, { focus: 'ALL' }))
-    setPublishChecklist(await storySystemApi.getPublishChecklist(projectId))
+    setFullBookAiReview(null)
+    const job = await storySystemApi.createProjectAiJob(projectId, {
+      type: 'FULL_BOOK_AI_REVIEW',
+      input: { focus: 'ALL' },
+    })
+    setProjectAiJobs((current) => [job, ...current.filter((item) => item.id !== job.id)])
+    setMessage('Full-book AI review started in the background. You can leave and come back later.')
   })
 
   return (
@@ -686,7 +711,7 @@ export function StorySystemPanel({
               </span>
             </div>
             <div className="grid grid-cols-2 gap-2">
-              <Button variant="outline" size="sm" onClick={runFullBookAiReview} isLoading={isBusy}>
+              <Button variant="outline" size="sm" onClick={runFullBookAiReview} isLoading={isBusy || !!activeFullBookAiReviewJob}>
                 <Sparkles className="w-4 h-4 mr-2" />
                 AI review
               </Button>
@@ -699,6 +724,17 @@ export function StorySystemPanel({
                 重算本章投影
               </Button>
             </div>
+            {latestFullBookAiReviewJob && latestFullBookAiReviewJob.status !== 'DONE' && (
+              <div className="rounded-lg border border-indigo-100 bg-indigo-50 p-3 text-xs text-indigo-950">
+                <div className="font-medium">AI full-book review · {latestFullBookAiReviewJob.status}</div>
+                {activeFullBookAiReviewJob && (
+                  <div className="mt-1 text-indigo-800">Running in the background; refresh or return later to see the result.</div>
+                )}
+                {latestFullBookAiReviewJob.status === 'FAILED' && latestFullBookAiReviewJob.error && (
+                  <div className="mt-1 text-red-700">{latestFullBookAiReviewJob.error}</div>
+                )}
+              </div>
+            )}
             {fullBookAiReview && (
               <div className="rounded-lg border border-indigo-100 bg-indigo-50 p-3 text-xs text-indigo-950">
                 <div className="font-medium">AI full-book review · {fullBookAiReview.status}</div>

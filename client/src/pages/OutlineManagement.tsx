@@ -20,12 +20,22 @@ import { Select } from '../components/ui/Select'
 import {
   outlinesApi,
   Outline,
+  OutlineAiJob,
   OutlineItem,
   CreateOutlineDto,
   CreateOutlineItemDto,
   GenerateOutlineDto,
   StructureHealthReport,
 } from '../api/outlines'
+
+function parseOutlineJobResult(job?: OutlineAiJob | null): { outline?: Outline } | null {
+  if (!job?.result) return null
+  try {
+    return JSON.parse(job.result) as { outline?: Outline }
+  } catch {
+    return null
+  }
+}
 
 const STRUCTURE_TYPES = [
   { value: 'FULL_BOOK', label: '全书大纲' },
@@ -60,6 +70,7 @@ export function OutlineManagement() {
   const [isLoading, setIsLoading] = useState(true)
   const [isGeneratingOutline, setIsGeneratingOutline] = useState(false)
   const [isAnalyzingStructure, setIsAnalyzingStructure] = useState(false)
+  const [outlineAiJobs, setOutlineAiJobs] = useState<OutlineAiJob[]>([])
   const [editingItem, setEditingItem] = useState<OutlineItem | null>(null)
   const [draggedItem, setDraggedItem] = useState<OutlineItem | null>(null)
   const [structureReport, setStructureReport] = useState<StructureHealthReport | null>(null)
@@ -93,6 +104,25 @@ export function OutlineManagement() {
     loadOutlines()
   }, [projectId])
 
+  useEffect(() => {
+    refreshOutlineAiJobs().catch((error) => {
+      console.error('加载大纲 AI 任务失败:', error)
+    })
+  }, [projectId])
+
+  useEffect(() => {
+    if (!outlineAiJobs.some((job) => ['PENDING', 'RUNNING'].includes(job.status))) return
+    const timer = window.setInterval(() => {
+      refreshOutlineAiJobs().catch((error) => {
+        console.error('刷新大纲 AI 任务失败:', error)
+      })
+    }, 2500)
+    return () => window.clearInterval(timer)
+  }, [outlineAiJobs, projectId])
+
+  const latestOutlineAiJob = outlineAiJobs[0] || null
+  const isOutlineAiJobRunning = !!latestOutlineAiJob && ['PENDING', 'RUNNING'].includes(latestOutlineAiJob.status)
+
   const loadOutlines = async () => {
     if (!projectId) return
     try {
@@ -102,6 +132,20 @@ export function OutlineManagement() {
       console.error('加载大纲失败:', error)
     } finally {
       setIsLoading(false)
+    }
+  }
+
+  const refreshOutlineAiJobs = async () => {
+    if (!projectId) return
+    const jobs = await outlinesApi.listAiJobs(projectId)
+    setOutlineAiJobs(jobs)
+
+    const latestDoneJob = jobs.find((job) => job.status === 'DONE')
+    const result = parseOutlineJobResult(latestDoneJob)
+    if (result?.outline) {
+      setSelectedOutline(result.outline)
+      setStructureReport(null)
+      await loadOutlines()
     }
   }
 
@@ -121,9 +165,8 @@ export function OutlineManagement() {
 
     setIsGeneratingOutline(true)
     try {
-      const generated = await outlinesApi.generateWithAi(projectId, aiFormData)
-      await loadOutlines()
-      setSelectedOutline(generated)
+      const job = await outlinesApi.createAiJob(projectId, aiFormData)
+      setOutlineAiJobs((jobs) => [job, ...jobs.filter((item) => item.id !== job.id)])
       setStructureReport(null)
       setIsAiModalOpen(false)
     } catch (error) {
@@ -399,7 +442,7 @@ export function OutlineManagement() {
             <p className="text-gray-600 mt-1">规划和管理故事的整体结构大纲</p>
           </div>
           <div className="flex gap-3">
-            <Button variant="outline" onClick={() => setIsAiModalOpen(true)}>
+            <Button variant="outline" onClick={() => setIsAiModalOpen(true)} isLoading={isOutlineAiJobRunning}>
               <Sparkles className="w-4 h-4 mr-2" />
               AI 生成大纲
             </Button>
@@ -409,6 +452,17 @@ export function OutlineManagement() {
             </Button>
           </div>
         </div>
+
+        {(isOutlineAiJobRunning || latestOutlineAiJob?.status === 'FAILED') && (
+          <div className="mb-6 rounded-lg border border-indigo-100 bg-indigo-50 p-4 text-sm text-indigo-900">
+            <div className="font-medium">
+              AI outline generation {isOutlineAiJobRunning ? 'is running in the background' : 'failed'}
+            </div>
+            <div className="mt-1 text-xs text-indigo-700">
+              {isOutlineAiJobRunning ? 'You can refresh or leave this page; the generated outline will appear when ready.' : latestOutlineAiJob?.error}
+            </div>
+          </div>
+        )}
 
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
           <div className="lg:col-span-1">
@@ -719,9 +773,15 @@ export function OutlineManagement() {
           </div>
         </div>
 
+        {isOutlineAiJobRunning && (
+          <div className="mt-4 rounded border border-indigo-100 bg-indigo-50 p-3 text-sm text-indigo-900">
+            Outline generation is running in the background.
+          </div>
+        )}
+
         <div className="flex justify-end gap-3 pt-4 border-t mt-4">
           <Button variant="outline" onClick={() => setIsAiModalOpen(false)}>取消</Button>
-          <Button onClick={handleGenerateOutline} isLoading={isGeneratingOutline}>
+          <Button onClick={handleGenerateOutline} isLoading={isGeneratingOutline || isOutlineAiJobRunning}>
             <Sparkles className="w-4 h-4 mr-2" />
             生成并保存
           </Button>

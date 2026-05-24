@@ -180,6 +180,18 @@ export interface StoryAiJob {
   updatedAt: string
 }
 
+export interface ProjectStoryAiJob {
+  id: string
+  projectId: string
+  type: 'FULL_BOOK_AI_REVIEW' | 'PUBLISHING_ASSETS' | string
+  status: 'PENDING' | 'RUNNING' | 'DONE' | 'FAILED' | string
+  input: string
+  result?: string | null
+  error?: string | null
+  createdAt: string
+  updatedAt: string
+}
+
 export interface FullBookReviewIssue {
   category: string
   severity: string
@@ -391,6 +403,19 @@ export const storySystemApi = {
     const response = await apiClient.get(
       `/projects/${projectId}/chapters/${chapterId}/story-system/ai-jobs`,
     )
+    return response.data
+  },
+
+  async createProjectAiJob(projectId: string, data: {
+    type: 'FULL_BOOK_AI_REVIEW' | 'PUBLISHING_ASSETS' | string
+    input?: Record<string, unknown>
+  }): Promise<ProjectStoryAiJob> {
+    const response = await apiClient.post(`/projects/${projectId}/story-system/ai-jobs`, data)
+    return response.data
+  },
+
+  async listProjectAiJobs(projectId: string): Promise<ProjectStoryAiJob[]> {
+    const response = await apiClient.get(`/projects/${projectId}/story-system/ai-jobs`)
     return response.data
   },
 

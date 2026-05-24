@@ -13,19 +13,29 @@ import {
   Download,
   ShieldCheck,
   Sparkles,
+  Loader2,
 } from 'lucide-react'
 import { Button } from '../components/ui/Button'
 import { Card } from '../components/ui/Card'
 import { Input } from '../components/ui/Input'
 import { Modal } from '../components/ui/Modal'
 import { chaptersApi, Chapter } from '../api/chapters'
-import { FullBookAiReview, FullBookReview, PublishChecklist, PublishingAssets, storySystemApi } from '../api/story-system'
+import { FullBookAiReview, FullBookReview, ProjectStoryAiJob, PublishChecklist, PublishingAssets, storySystemApi } from '../api/story-system'
 
 const STATUS_CONFIG = {
   draft: { label: '草稿', icon: Clock, color: 'text-yellow-600 bg-yellow-50' },
   writing: { label: '写作中', icon: Edit2, color: 'text-blue-600 bg-blue-50' },
   completed: { label: '已完成', icon: CheckCircle, color: 'text-green-600 bg-green-50' },
   review: { label: '待审核', icon: Eye, color: 'text-purple-600 bg-purple-50' },
+}
+
+function parseProjectJobResult<T>(job?: ProjectStoryAiJob | null): T | null {
+  if (!job?.result) return null
+  try {
+    return JSON.parse(job.result) as T
+  } catch {
+    return null
+  }
 }
 
 export function ChapterManagement() {
@@ -46,10 +56,32 @@ export function ChapterManagement() {
   const [publishChecklist, setPublishChecklist] = useState<PublishChecklist | null>(null)
   const [publishingAssets, setPublishingAssets] = useState<PublishingAssets | null>(null)
   const [isStoryActionBusy, setIsStoryActionBusy] = useState(false)
+  const [projectAiJobs, setProjectAiJobs] = useState<ProjectStoryAiJob[]>([])
 
   useEffect(() => {
     loadChapters()
   }, [projectId])
+
+  useEffect(() => {
+    refreshProjectAiJobs().catch((error) => {
+      console.error('加载项目 AI 任务失败:', error)
+    })
+  }, [projectId])
+
+  useEffect(() => {
+    if (!projectAiJobs.some((job) => ['PENDING', 'RUNNING'].includes(job.status))) return
+    const timer = window.setInterval(() => {
+      refreshProjectAiJobs().catch((error) => {
+        console.error('刷新项目 AI 任务失败:', error)
+      })
+    }, 2500)
+    return () => window.clearInterval(timer)
+  }, [projectAiJobs, projectId])
+
+  const latestAiReviewJob = projectAiJobs.find((job) => job.type === 'FULL_BOOK_AI_REVIEW') || null
+  const latestPublishingJob = projectAiJobs.find((job) => job.type === 'PUBLISHING_ASSETS') || null
+  const isAiReviewRunning = !!latestAiReviewJob && ['PENDING', 'RUNNING'].includes(latestAiReviewJob.status)
+  const isPublishingRunning = !!latestPublishingJob && ['PENDING', 'RUNNING'].includes(latestPublishingJob.status)
 
   const loadChapters = async () => {
     if (!projectId) return
@@ -60,6 +92,24 @@ export function ChapterManagement() {
       console.error('加载章节失败:', error)
     } finally {
       setIsLoading(false)
+    }
+  }
+
+  const refreshProjectAiJobs = async () => {
+    if (!projectId) return
+    const jobs = await storySystemApi.listProjectAiJobs(projectId)
+    setProjectAiJobs(jobs)
+
+    const aiReviewJob = jobs.find((job) => job.type === 'FULL_BOOK_AI_REVIEW')
+    if (aiReviewJob?.status === 'DONE') {
+      const result = parseProjectJobResult<FullBookAiReview>(aiReviewJob)
+      if (result) setFullBookAiReview(result)
+    }
+
+    const publishingJob = jobs.find((job) => job.type === 'PUBLISHING_ASSETS')
+    if (publishingJob?.status === 'DONE') {
+      const result = parseProjectJobResult<PublishingAssets>(publishingJob)
+      if (result) setPublishingAssets(result)
     }
   }
 
@@ -168,13 +218,15 @@ export function ChapterManagement() {
 
   const handleFullBookAiReview = async () => {
     if (!projectId) return
-    setIsStoryActionBusy(true)
     try {
-      setFullBookAiReview(await storySystemApi.reviewFullBookWithAi(projectId, { focus: 'ALL' }))
+      setFullBookAiReview(null)
+      const job = await storySystemApi.createProjectAiJob(projectId, {
+        type: 'FULL_BOOK_AI_REVIEW',
+        input: { focus: 'ALL' },
+      })
+      setProjectAiJobs((jobs) => [job, ...jobs.filter((item) => item.id !== job.id)])
     } catch (error) {
       console.error('AI 全书审查失败:', error)
-    } finally {
-      setIsStoryActionBusy(false)
     }
   }
 
@@ -227,13 +279,15 @@ export function ChapterManagement() {
 
   const handleGeneratePublishingAssets = async () => {
     if (!projectId) return
-    setIsStoryActionBusy(true)
     try {
-      setPublishingAssets(await storySystemApi.generatePublishingAssets(projectId))
+      setPublishingAssets(null)
+      const job = await storySystemApi.createProjectAiJob(projectId, {
+        type: 'PUBLISHING_ASSETS',
+        input: {},
+      })
+      setProjectAiJobs((jobs) => [job, ...jobs.filter((item) => item.id !== job.id)])
     } catch (error) {
       console.error('出版素材生成失败:', error)
-    } finally {
-      setIsStoryActionBusy(false)
     }
   }
 
@@ -269,7 +323,7 @@ export function ChapterManagement() {
               <ShieldCheck className="w-4 h-4 mr-2" />
               全书审查
             </Button>
-            <Button variant="outline" onClick={handleFullBookAiReview} isLoading={isStoryActionBusy}>
+            <Button variant="outline" onClick={handleFullBookAiReview} isLoading={isAiReviewRunning}>
               <Sparkles className="w-4 h-4 mr-2" />
               AI 审查
             </Button>
@@ -289,7 +343,7 @@ export function ChapterManagement() {
               <Download className="w-4 h-4 mr-2" />
               PDF
             </Button>
-            <Button variant="outline" onClick={handleGeneratePublishingAssets} isLoading={isStoryActionBusy}>
+            <Button variant="outline" onClick={handleGeneratePublishingAssets} isLoading={isPublishingRunning}>
               <Sparkles className="w-4 h-4 mr-2" />
               出版素材
             </Button>
@@ -299,6 +353,30 @@ export function ChapterManagement() {
             </Button>
           </div>
         </div>
+
+        {(isAiReviewRunning || latestAiReviewJob?.status === 'FAILED') && (
+          <div className="mb-6 rounded-lg border border-indigo-100 bg-indigo-50 p-4 text-sm text-indigo-900">
+            <div className="flex items-center gap-2 font-medium">
+              {isAiReviewRunning && <Loader2 className="h-4 w-4 animate-spin" />}
+              AI full-book review {isAiReviewRunning ? 'is running in the background' : 'failed'}
+            </div>
+            <div className="mt-1 text-xs text-indigo-700">
+              {isAiReviewRunning ? 'You can refresh or leave this page; the result will be restored here.' : latestAiReviewJob?.error}
+            </div>
+          </div>
+        )}
+
+        {(isPublishingRunning || latestPublishingJob?.status === 'FAILED') && (
+          <div className="mb-6 rounded-lg border border-indigo-100 bg-indigo-50 p-4 text-sm text-indigo-900">
+            <div className="flex items-center gap-2 font-medium">
+              {isPublishingRunning && <Loader2 className="h-4 w-4 animate-spin" />}
+              Publishing assets {isPublishingRunning ? 'are being generated in the background' : 'failed'}
+            </div>
+            <div className="mt-1 text-xs text-indigo-700">
+              {isPublishingRunning ? 'The task keeps running after page refresh and resumes automatically.' : latestPublishingJob?.error}
+            </div>
+          </div>
+        )}
 
         {fullBookReview && (
           <div className="mb-6 rounded-lg border border-gray-200 bg-white p-4">

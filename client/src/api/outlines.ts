@@ -56,6 +56,17 @@ export interface StructureHealthReport {
   suggestions: string[]
 }
 
+export interface OutlineAiJob {
+  id: string
+  projectId: string
+  status: 'PENDING' | 'RUNNING' | 'DONE' | 'FAILED' | string
+  input: string
+  result?: string | null
+  error?: string | null
+  createdAt: string
+  updatedAt: string
+}
+
 export interface UpdateOutlineDto {
   title?: string
   description?: string
@@ -110,6 +121,16 @@ export const outlinesApi = {
 
   async generateWithAi(projectId: string, data: GenerateOutlineDto): Promise<Outline> {
     const response = await apiClient.post(`/projects/${projectId}/outlines/ai-generate`, data)
+    return response.data
+  },
+
+  async createAiJob(projectId: string, data: GenerateOutlineDto): Promise<OutlineAiJob> {
+    const response = await apiClient.post(`/projects/${projectId}/outlines/ai-jobs`, data)
+    return response.data
+  },
+
+  async listAiJobs(projectId: string): Promise<OutlineAiJob[]> {
+    const response = await apiClient.get(`/projects/${projectId}/outlines/ai-jobs`)
     return response.data
   },
 
