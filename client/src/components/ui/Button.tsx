@@ -12,11 +12,11 @@ export const Button = React.forwardRef<HTMLButtonElement, ButtonProps>(
     const baseStyles = 'inline-flex items-center justify-center rounded-lg font-medium transition-all duration-200 focus:outline-none focus:ring-2 focus:ring-offset-2 disabled:opacity-50 disabled:cursor-not-allowed';
     
     const variants = {
-      primary: 'bg-gradient-to-r from-indigo-600 to-indigo-500 text-white hover:from-indigo-700 hover:to-indigo-600 shadow-md hover:shadow-lg focus:ring-indigo-500',
-      secondary: 'bg-gray-100 text-gray-900 hover:bg-gray-200 focus:ring-gray-400',
-      outline: 'border-2 border-gray-200 bg-transparent text-gray-700 hover:border-indigo-500 hover:text-indigo-600 focus:ring-indigo-500',
-      ghost: 'bg-transparent text-gray-700 hover:bg-gray-100 focus:ring-gray-400',
-      destructive: 'bg-red-500 text-white hover:bg-red-600 focus:ring-red-500'
+      primary: 'bg-[var(--accent-color)] text-white hover:bg-[var(--accent-hover)] shadow-md hover:shadow-lg',
+      secondary: 'bg-[var(--bg-tertiary)] text-[var(--text-primary)] hover:bg-[var(--bg-hover)]',
+      outline: 'border-2 border-[var(--border-color)] bg-transparent text-[var(--text-primary)] hover:border-[var(--accent-color)] hover:text-[var(--accent-color)]',
+      ghost: 'bg-transparent text-[var(--text-primary)] hover:bg-[var(--bg-hover)]',
+      destructive: 'bg-[var(--danger-color)] text-white hover:opacity-90'
     };
 
     const sizes = {

@@ -18,6 +18,7 @@ import { Card } from '../components/ui/Card'
 import { Input } from '../components/ui/Input'
 import { Textarea } from '../components/ui/Textarea'
 import { Modal } from '../components/ui/Modal'
+import { DeleteConfirmModal } from '../components/DeleteConfirmModal'
 import { Select } from '../components/ui/Select'
 import { charactersApi, Character } from '../api/characters'
 
@@ -117,6 +118,8 @@ export function EnhancedCharacterNetwork() {
   const svgRef = useRef<SVGSVGElement>(null)
   const [isDragging, setIsDragging] = useState(false)
   const [dragNode, setDragNode] = useState<string | null>(null)
+  const [dragStartPos, setDragStartPos] = useState({ x: 0, y: 0 })
+  const dragOffsetRef = useRef({ x: 0, y: 0 })
 
   const [characters, setCharacters] = useState<Character[]>([])
   const [selectedCharacter, setSelectedCharacter] = useState<Character | null>(null)
@@ -138,8 +141,12 @@ export function EnhancedCharacterNetwork() {
 
   const [activeTab, setActiveTab] = useState<'list' | 'graph' | 'matrix' | 'timeline'>('graph')
   const [graphScale, setGraphScale] = useState(1)
-  const [graphOffset] = useState({ x: 0, y: 0 })
-  const [panMode] = useState(false)
+  const [graphOffset, setGraphOffset] = useState({ x: 0, y: 0 })
+  const [panMode, setPanMode] = useState(false)
+
+  // 动态节点位置
+  const [nodePositions, setNodePositions] = useState<Map<string, { x: number; y: number; fx?: number; fy?: number }>>(new Map())
+  const animationRef = useRef<number | null>(null)
 
   // 分组功能
   const [groups] = useState<GroupConfig[]>([
@@ -203,89 +210,7 @@ export function EnhancedCharacterNetwork() {
     return option?.color || '#64748b'
   }
 
-  // 计算力导向布局
-  const computeForceLayout = useCallback(
-    (nodes: GraphNode[], links: GraphLink[], width = 800, height = 600) => {
-      const k = 0.01
-      const repulsion = 400
-      const attraction = 0.5
-      const damping = 0.9
-      const iterations = 100
-
-      const nodeMap = new Map(nodes.map(n => [n.id, n]))
-
-      for (let iter = 0; iter < iterations; iter++) {
-        // 相互排斥
-        for (let i = 0; i < nodes.length; i++) {
-          const node1 = nodes[i]
-          for (let j = i + 1; j < nodes.length; j++) {
-            const node2 = nodes[j]
-            const dx = node1.x - node2.x
-            const dy = node1.y - node2.y
-            const distance = Math.sqrt(dx * dx + dy * dy) || 1
-            const force = repulsion / (distance * distance)
-
-            const fx = (dx / distance) * force
-            const fy = (dy / distance) * force
-
-            node1.vx += fx
-            node1.vy += fy
-            node2.vx -= fx
-            node2.vy -= fy
-          }
-        }
-
-        // 链接吸引
-        for (const link of links) {
-          const source = nodeMap.get(link.source)
-          const target = nodeMap.get(link.target)
-          if (!source || !target) continue
-
-          const dx = source.x - target.x
-          const dy = source.y - target.y
-          const distance = Math.sqrt(dx * dx + dy * dy) || 1
-          const force = (distance * attraction * link.weight) / 10
-
-          const fx = (dx / distance) * force
-          const fy = (dy / distance) * force
-
-          source.vx -= fx
-          source.vy -= fy
-          target.vx += fx
-          target.vy += fy
-        }
-
-        // 向中心吸引
-        for (const node of nodes) {
-          const dx = node.x - width / 2
-          const dy = node.y - height / 2
-          const distance = Math.sqrt(dx * dx + dy * dy) || 1
-
-          node.vx -= (dx / distance) * k
-          node.vy -= (dy / distance) * k
-        }
-
-        // 更新位置
-        for (const node of nodes) {
-          if (node.fx !== undefined || node.fy !== undefined) continue
-
-          node.x += node.vx
-          node.y += node.vy
-          node.vx *= damping
-          node.vy *= damping
-
-          // 边界限制
-          node.x = Math.max(50, Math.min(width - 50, node.x))
-          node.y = Math.max(50, Math.min(height - 50, node.y))
-        }
-      }
-
-      return { nodes, links }
-    },
-    []
-  )
-
-  // 准备图数据
+  // 准备图数据 - 只计算初始位置
   const { nodes, links } = useMemo(() => {
     let filteredChars = characters.filter(char => {
       const matchesSearch = !searchQuery || char.name.includes(searchQuery)
@@ -305,7 +230,6 @@ export function EnhancedCharacterNetwork() {
       const angle = (2 * Math.PI * i) / filteredChars.length
       const radius = 150 + Math.min(filteredChars.length * 5, 100)
 
-      // 计算重要性（关系数量+角色）
       const importance =
         ((char.relationshipsFrom?.length || 0) + (char.relationshipsTo?.length || 0)) * 10 +
         (char.role === 'protagonist' ? 100 : char.role === 'antagonist' ? 80 : 20)
@@ -348,13 +272,148 @@ export function EnhancedCharacterNetwork() {
       })
     })
 
-    // 计算布局
-    if (graphNodes.length > 0) {
-      return computeForceLayout(graphNodes, graphLinks)
+    return { nodes: graphNodes, links: graphLinks }
+  }, [characters, searchQuery, filterRole, showMinorCharacters, selectedGroup])
+
+  // 力导向动画循环
+  const forceSimulation = useCallback(() => {
+    if (activeTab !== 'graph') return
+
+    const width = 800
+    const height = 600
+    const repulsion = 300
+    const attraction = 0.3
+    const centerForce = 0.001
+
+    setNodePositions(prev => {
+      const newPositions = new Map(prev)
+      const nodesArray = Array.from(newPositions.entries())
+
+      // 相互排斥
+      for (let i = 0; i < nodesArray.length; i++) {
+        const [id1, node1] = nodesArray[i]
+        for (let j = i + 1; j < nodesArray.length; j++) {
+          const [id2, node2] = nodesArray[j]
+          if (id1 === id2) continue
+
+          const dx = node1.x - node2.x
+          const dy = node1.y - node2.y
+          const distance = Math.sqrt(dx * dx + dy * dy) || 1
+          const force = repulsion / (distance * distance)
+
+          const fx = (dx / distance) * force
+          const fy = (dy / distance) * force
+
+          const updated1 = newPositions.get(id1)!
+          const updated2 = newPositions.get(id2)!
+          updated1.fx = (updated1.fx || 0) + fx
+          updated1.fy = (updated1.fy || 0) + fy
+          updated2.fx = (updated2.fx || 0) - fx
+          updated2.fy = (updated2.fy || 0) - fy
+        }
+      }
+
+      // 链接吸引 - 需要从links中获取信息
+      const linksArray = links
+      const nodeMap = new Map(newPositions)
+
+      for (const link of linksArray) {
+        const source = nodeMap.get(link.source)
+        const target = nodeMap.get(link.target)
+        if (!source || !target) continue
+
+        const dx = source.x - target.x
+        const dy = source.y - target.y
+        const distance = Math.sqrt(dx * dx + dy * dy) || 1
+        const force = (distance * attraction * link.weight) / 10
+
+        const fx = (dx / distance) * force
+        const fy = (dy / distance) * force
+
+        const updatedSource = newPositions.get(link.source)!
+        const updatedTarget = newPositions.get(link.target)!
+        updatedSource.fx = (updatedSource.fx || 0) - fx
+        updatedSource.fy = (updatedSource.fy || 0) - fy
+        updatedTarget.fx = (updatedTarget.fx || 0) + fx
+        updatedTarget.fy = (updatedTarget.fy || 0) + fy
+      }
+
+      // 向中心吸引和更新位置
+      for (const [id, node] of newPositions) {
+        // 如果正在拖动，跳过物理计算
+        if (dragNode === id) continue
+
+        const dx = node.x - width / 2
+        const dy = node.y - height / 2
+        const distance = Math.sqrt(dx * dx + dy * dy) || 1
+
+        const fx = (node.fx || 0) - (dx / distance) * centerForce
+        const fy = (node.fy || 0) - (dy / distance) * centerForce
+
+        node.x += fx
+        node.y += fy
+
+        // 边界限制
+        node.x = Math.max(50, Math.min(width - 50, node.x))
+        node.y = Math.max(50, Math.min(height - 50, node.y))
+
+        // 重置力
+        node.fx = 0
+        node.fy = 0
+      }
+
+      return newPositions
+    })
+
+    animationRef.current = requestAnimationFrame(forceSimulation)
+  }, [activeTab, links, dragNode])
+
+  // 初始设置节点位置
+  useEffect(() => {
+    if (activeTab === 'graph' && nodes.length > 0) {
+      const initialPositions = new Map<string, { x: number; y: number; fx?: number; fy?: number }>()
+
+      nodes.forEach(node => {
+        if (!nodePositions.has(node.id)) {
+          initialPositions.set(node.id, {
+            x: node.x,
+            y: node.y,
+            fx: 0,
+            fy: 0
+          })
+        }
+      })
+
+      if (initialPositions.size > 0) {
+        setNodePositions(prev => {
+          const updated = new Map(prev)
+          initialPositions.forEach((pos, id) => {
+            if (!updated.has(id)) {
+              updated.set(id, pos)
+            }
+          })
+          return updated
+        })
+      }
+    }
+  }, [activeTab, nodes, nodePositions])
+
+  // 启动/停止动画
+  useEffect(() => {
+    if (activeTab === 'graph') {
+      animationRef.current = requestAnimationFrame(forceSimulation)
+    } else {
+      if (animationRef.current) {
+        cancelAnimationFrame(animationRef.current)
+      }
     }
 
-    return { nodes: graphNodes, links: graphLinks }
-  }, [characters, searchQuery, filterRole, showMinorCharacters, selectedGroup, computeForceLayout])
+    return () => {
+      if (animationRef.current) {
+        cancelAnimationFrame(animationRef.current)
+      }
+    }
+  }, [activeTab, forceSimulation])
 
   // 关系查询功能
   const queryRelationships = (query: string) => {
@@ -409,26 +468,78 @@ export function EnhancedCharacterNetwork() {
   }
 
   // 交互处理
-  const handleMouseDown = (_e: React.MouseEvent, nodeId?: string) => {
-    if (nodeId) {
-      setIsDragging(true)
-      setDragNode(nodeId)
-    } else if (panMode) {
-      setIsDragging(true)
+  const getGraphPoint = (e: React.MouseEvent) => {
+    const svg = svgRef.current
+    if (!svg) return null
+
+    const matrix = svg.getScreenCTM()
+    if (!matrix) return null
+
+    const svgPoint = new DOMPoint(e.clientX, e.clientY).matrixTransform(matrix.inverse())
+    return {
+      x: (svgPoint.x - graphOffset.x) / graphScale,
+      y: (svgPoint.y - graphOffset.y) / graphScale,
     }
   }
 
-  const handleMouseMove = (_e: React.MouseEvent) => {
-    if (!isDragging) return
+  const handleMouseDown = (e: React.MouseEvent, nodeId?: string) => {
+    e.stopPropagation()
+
+    if (nodeId) {
+      const point = getGraphPoint(e)
+      if (!point) return
+
+      const node = nodePositions.get(nodeId)
+      dragOffsetRef.current = node
+        ? { x: point.x - node.x, y: point.y - node.y }
+        : { x: 0, y: 0 }
+
+      setIsDragging(true)
+      setDragNode(nodeId)
+      setDragStartPos(point)
+    } else if (panMode) {
+      const point = getGraphPoint(e)
+      if (!point) return
+
+      setIsDragging(true)
+      setDragStartPos(point)
+    }
+  }
+
+  const handleMouseMove = (e: React.MouseEvent) => {
+    if (!isDragging || !svgRef.current) return
+
+    const point = getGraphPoint(e)
+    if (!point) return
 
     if (dragNode) {
-      setCharacters(prev => prev)
+      setNodePositions(prev => {
+        const updated = new Map(prev)
+        const node = updated.get(dragNode)
+        if (node) {
+          node.x = point.x - dragOffsetRef.current.x
+          node.y = point.y - dragOffsetRef.current.y
+          node.fx = 0
+          node.fy = 0
+        }
+        return updated
+      })
     } else if (panMode) {
-      // 实现平移逻辑
+      const dx = (point.x - dragStartPos.x) * graphScale
+      const dy = (point.y - dragStartPos.y) * graphScale
+      setGraphOffset(prev => ({
+        x: prev.x + dx,
+        y: prev.y + dy
+      }))
     }
   }
 
   const handleMouseUp = () => {
+    setIsDragging(false)
+    setDragNode(null)
+  }
+
+  const handleMouseLeave = () => {
     setIsDragging(false)
     setDragNode(null)
   }
@@ -468,15 +579,24 @@ export function EnhancedCharacterNetwork() {
     setIsModalOpen(true)
   }
 
-  const handleDelete = async (character: Character) => {
-    if (!projectId) return
-    if (confirm(`确定要删除 ${character.name} 吗？`)) {
-      try {
-        await charactersApi.delete(projectId, character.id)
-        await loadCharacters()
-      } catch (error) {
-        console.error('删除失败:', error)
-      }
+  const [deleteModal, setDeleteModal] = useState({
+    isOpen: false,
+    character: null as Character | null
+  })
+
+  const handleDelete = (character: Character) => {
+    setDeleteModal({ isOpen: true, character })
+  }
+
+  const confirmDelete = async () => {
+    if (!projectId || !deleteModal.character) return
+    try {
+      await charactersApi.delete(projectId, deleteModal.character.id)
+      await loadCharacters()
+    } catch (error) {
+      console.error('删除失败:', error)
+    } finally {
+      setDeleteModal({ isOpen: false, character: null })
     }
   }
 
@@ -544,20 +664,20 @@ export function EnhancedCharacterNetwork() {
 
   if (isLoading) {
     return (
-      <div className="p-8 flex items-center justify-center">
-        <div className="text-gray-500">加载中...</div>
+      <div className="h-full flex items-center justify-center bg-[var(--bg-primary)]">
+        <div className="text-[var(--text-muted)]">加载中...</div>
       </div>
     )
   }
 
   return (
-    <div className="min-h-screen bg-gray-50 p-6">
+    <div className="h-full bg-[var(--bg-primary)] p-6 overflow-y-auto">
       <div className="max-w-7xl mx-auto">
         {/* 头部 */}
         <div className="flex justify-between items-center mb-6">
           <div>
-            <h1 className="text-2xl font-bold text-gray-900">人物关系网络</h1>
-            <p className="text-gray-600 mt-1">
+            <h1 className="text-2xl font-bold text-[var(--text-primary)]">人物关系网络</h1>
+            <p className="text-[var(--text-muted)] mt-1">
               可视化管理故事中的角色关系，支持力导向布局、分组、查询
             </p>
           </div>
@@ -574,17 +694,17 @@ export function EnhancedCharacterNetwork() {
         </div>
 
         {/* 工具栏 */}
-        <Card className="mb-6 p-4">
+        <Card className="mb-6 p-4 bg-[var(--bg-secondary)] border-[var(--border-color)]">
           <div className="flex flex-wrap gap-4 items-center">
             {/* 搜索 */}
             <div className="flex-1 min-w-[200px]">
               <div className="relative">
-                <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
+                <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-[var(--text-muted)]" />
                 <Input
                   placeholder="搜索人物..."
                   value={searchQuery}
                   onChange={(e) => setSearchQuery(e.target.value)}
-                  className="pl-10"
+                  className="pl-10 bg-[var(--bg-primary)] border-[var(--border-color)] text-[var(--text-primary)] placeholder:text-[var(--text-muted)] focus:border-[var(--accent-color)]"
                 />
               </div>
             </div>
@@ -593,7 +713,7 @@ export function EnhancedCharacterNetwork() {
             <Select
               value={filterRole}
               onChange={(e) => setFilterRole(e.target.value)}
-              className="w-40"
+              className="w-40 bg-[var(--bg-primary)] border-[var(--border-color)] text-[var(--text-primary)]"
             >
               <option value="">全部角色</option>
               {ROLE_OPTIONS.map(opt => (
@@ -605,7 +725,7 @@ export function EnhancedCharacterNetwork() {
             <Select
               value={selectedGroup || ''}
               onChange={(e) => setSelectedGroup(e.target.value || null)}
-              className="w-40"
+              className="w-40 bg-[var(--bg-primary)] border-[var(--border-color)] text-[var(--text-primary)]"
             >
               <option value="">全部分组</option>
               {groups.map(group => (
@@ -616,11 +736,11 @@ export function EnhancedCharacterNetwork() {
             </Select>
 
             {/* 视图切换 */}
-            <div className="flex border rounded-lg overflow-hidden">
+            <div className="flex border border-[var(--border-color)] rounded-lg overflow-hidden">
               <button
                 onClick={() => setActiveTab('list')}
                 className={`px-3 py-2 text-sm font-medium transition-colors ${
-                  activeTab === 'list' ? 'bg-blue-500 text-white' : 'bg-white text-gray-700'
+                  activeTab === 'list' ? 'bg-[var(--accent-color)] text-[var(--text-primary)]' : 'bg-[var(--bg-secondary)] text-[var(--text-muted)] hover:text-[var(--text-primary)]'
                 }`}
               >
                 <Users className="w-4 h-4" />
@@ -628,7 +748,7 @@ export function EnhancedCharacterNetwork() {
               <button
                 onClick={() => setActiveTab('graph')}
                 className={`px-3 py-2 text-sm font-medium transition-colors ${
-                  activeTab === 'graph' ? 'bg-blue-500 text-white' : 'bg-white text-gray-700'
+                  activeTab === 'graph' ? 'bg-[var(--accent-color)] text-[var(--text-primary)]' : 'bg-[var(--bg-secondary)] text-[var(--text-muted)] hover:text-[var(--text-primary)]'
                 }`}
               >
                 <Link2 className="w-4 h-4" />
@@ -636,7 +756,7 @@ export function EnhancedCharacterNetwork() {
               <button
                 onClick={() => setActiveTab('matrix')}
                 className={`px-3 py-2 text-sm font-medium transition-colors ${
-                  activeTab === 'matrix' ? 'bg-blue-500 text-white' : 'bg-white text-gray-700'
+                  activeTab === 'matrix' ? 'bg-[var(--accent-color)] text-[var(--text-primary)]' : 'bg-[var(--bg-secondary)] text-[var(--text-muted)] hover:text-[var(--text-primary)]'
                 }`}
               >
                 <Layers className="w-4 h-4" />
@@ -653,7 +773,7 @@ export function EnhancedCharacterNetwork() {
             <div className="flex gap-2 ml-auto">
               <button
                 onClick={() => setShowLabels(!showLabels)}
-                className={`p-2 rounded border transition-colors ${showLabels ? 'bg-blue-50 text-blue-600 border-blue-200' : 'border-gray-200 text-gray-400'}`}
+                className={`p-2 rounded border transition-colors ${showLabels ? 'bg-[var(--accent-color)]/20 text-[var(--accent-color)] border-[var(--accent-color)]/50' : 'border-[var(--border-color)] text-[var(--text-muted)]'}`}
                 title="显示标签"
               >
                 <Eye className="w-4 h-4" />
@@ -661,28 +781,39 @@ export function EnhancedCharacterNetwork() {
               <button
                 onClick={() => setShowMinorCharacters(!showMinorCharacters)}
                 className={`p-2 rounded border transition-colors ${
-                  showMinorCharacters ? 'bg-blue-50 text-blue-600 border-blue-200' : 'border-gray-200 text-gray-400'
+                  showMinorCharacters ? 'bg-[var(--accent-color)]/20 text-[var(--accent-color)] border-[var(--accent-color)]/50' : 'border-[var(--border-color)] text-[var(--text-muted)]'
                 }`}
                 title="显示次要角色"
               >
                 <Users className="w-4 h-4" />
               </button>
+              <button
+                onClick={() => setPanMode(!panMode)}
+                className={`p-2 rounded border transition-colors ${
+                  panMode ? 'bg-[var(--accent-color)]/20 text-[var(--accent-color)] border-[var(--accent-color)]/50' : 'border-[var(--border-color)] text-[var(--text-muted)]'
+                }`}
+                title="平移模式"
+              >
+                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 16V4m0 0L3 8m4-4l4 4m6 0v12m0 0l4-4m-4 4l-4-4" />
+                </svg>
+              </button>
             </div>
 
             {/* 缩放控制 */}
-            <div className="flex items-center gap-2 border rounded-lg px-3 py-1">
+            <div className="flex items-center gap-2 border border-[var(--border-color)] rounded-lg px-3 py-1 bg-[var(--bg-secondary)]">
               <button
                 onClick={() => setGraphScale(s => Math.max(0.3, s - 0.1))}
-                className="p-1 text-gray-600 hover:text-gray-800"
+                className="p-1 text-[var(--text-muted)] hover:text-[var(--text-primary)]"
               >
                 <ZoomOut className="w-4 h-4" />
               </button>
-              <span className="text-sm text-gray-600 w-12 text-center">
+              <span className="text-sm text-gray-400 w-12 text-center">
                 {Math.round(graphScale * 100)}%
               </span>
               <button
                 onClick={() => setGraphScale(s => Math.min(3, s + 0.1))}
-                className="p-1 text-gray-600 hover:text-gray-800"
+                className="p-1 text-[var(--text-muted)] hover:text-[var(--text-primary)]"
               >
                 <ZoomIn className="w-4 h-4" />
               </button>
@@ -691,7 +822,7 @@ export function EnhancedCharacterNetwork() {
 
           {/* 关系查询面板 */}
           {showQuery && (
-            <div className="mt-4 pt-4 border-t">
+            <div className="mt-4 pt-4 border-t border-[var(--border-color)]">
               <div className="flex gap-3">
                 <Input
                   placeholder="搜索关系类型或人物..."
@@ -700,19 +831,19 @@ export function EnhancedCharacterNetwork() {
                     setRelationshipQuery(e.target.value)
                     queryRelationships(e.target.value)
                   }}
-                  className="flex-1"
+                  className="flex-1 bg-[var(--bg-primary)] border-[var(--border-color)] text-[var(--text-primary)] placeholder:text-[var(--text-muted)] focus:border-[var(--accent-color)]"
                 />
               </div>
               {queryResults.length > 0 && (
                 <div className="mt-3 space-y-2 max-h-48 overflow-y-auto">
                   {queryResults.map((result, i) => (
-                    <div key={i} className="p-2 bg-gray-50 rounded text-sm">
-                      <div className="font-medium text-gray-900">{result.character}</div>
-                      <div className="text-gray-600 mt-1 space-y-1">
+                    <div key={i} className="p-2 bg-[var(--bg-primary)] rounded text-sm border border-[var(--border-color)]">
+                      <div className="font-medium text-[var(--text-primary)]">{result.character}</div>
+                      <div className="text-[var(--text-muted)] mt-1 space-y-1">
                         {result.relationships.map((rel: any, j: number) => (
                           <div key={j} className="text-xs">
-                            {rel.from} → {rel.to}: <span className="text-blue-600">{rel.relationship}</span>
-                            {rel.description && <span className="text-gray-400 ml-2">({rel.description})</span>}
+                            {rel.from} → {rel.to}: <span className="text-[var(--accent-color)]">{rel.relationship}</span>
+                            {rel.description && <span className="text-gray-500 ml-2">({rel.description})</span>}
                           </div>
                         ))}
                       </div>
@@ -732,12 +863,12 @@ export function EnhancedCharacterNetwork() {
               const matchesRole = !filterRole || char.role === filterRole
               return matchesSearch && matchesRole
             }).map(character => (
-              <Card key={character.id} className="hover:shadow-md transition-shadow">
+              <Card key={character.id} className="hover:shadow-md transition-shadow bg-[var(--bg-secondary)] border-[var(--border-color)]">
                 <div className="p-4">
                   <div className="flex justify-between items-start mb-3">
                     <div>
                       <div className="flex items-center gap-2">
-                        <h3 className="font-semibold text-lg text-gray-900">{character.name}</h3>
+                        <h3 className="font-semibold text-lg text-[var(--text-primary)]">{character.name}</h3>
                         {character.role && (
                           <span
                             className="text-xs px-2 py-0.5 rounded"
@@ -751,13 +882,13 @@ export function EnhancedCharacterNetwork() {
                     <div className="flex gap-1">
                       <button
                         onClick={() => handleEdit(character)}
-                        className="p-1 text-gray-400 hover:text-blue-600"
+                        className="p-1 text-[var(--text-muted)] hover:text-[var(--accent-color)]"
                       >
                         <Edit2 className="w-4 h-4" />
                       </button>
                       <button
                         onClick={() => handleDelete(character)}
-                        className="p-1 text-gray-400 hover:text-red-600"
+                        className="p-1 text-[var(--text-muted)] hover:text-red-400"
                       >
                         <Trash2 className="w-4 h-4" />
                       </button>
@@ -765,23 +896,23 @@ export function EnhancedCharacterNetwork() {
                   </div>
 
                   {character.appearance && (
-                    <p className="text-sm text-gray-600 mb-2 line-clamp-2">{character.appearance}</p>
+                    <p className="text-sm text-[var(--text-muted)] mb-2 line-clamp-2">{character.appearance}</p>
                   )}
                   {character.personality && (
-                    <p className="text-sm text-gray-500 mb-3 line-clamp-2">
-                      <span className="font-medium">性格：</span>{character.personality}
+                    <p className="text-sm text-[var(--text-muted)] mb-3 line-clamp-2">
+                      <span className="font-medium text-gray-300">性格：</span>{character.personality}
                     </p>
                   )}
 
-                  <div className="border-t pt-3 mt-3">
+                  <div className="border-t border-[var(--border-color)] pt-3 mt-3">
                     <div className="flex justify-between items-center mb-2">
-                      <span className="text-sm font-medium text-gray-700">关系</span>
+                      <span className="text-sm font-medium text-[var(--text-secondary)]">关系</span>
                       <button
                         onClick={() => {
                           setSelectedCharacter(character)
                           setShowRelationModal(true)
                         }}
-                        className="text-xs text-blue-600 hover:text-blue-700"
+                        className="text-xs text-[var(--accent-color)] hover:text-[#0096e6]"
                       >
                         + 添加
                       </button>
@@ -824,11 +955,11 @@ export function EnhancedCharacterNetwork() {
                             </span>
                           ))}
                           {relations.length > 4 && (
-                            <span className="text-xs text-gray-400">+{relations.length - 4} 更多</span>
+                            <span className="text-xs text-[var(--text-muted)]">+{relations.length - 4} 更多</span>
                           )}
                         </div>
                       ) : (
-                        <span className="text-xs text-gray-400">暂无关系</span>
+                        <span className="text-xs text-[var(--text-muted)]">暂无关系</span>
                       )
                     })()}
                   </div>
@@ -840,19 +971,18 @@ export function EnhancedCharacterNetwork() {
 
         {/* 力导向图视图 */}
         {activeTab === 'graph' && (
-          <Card className="overflow-hidden">
+          <Card className="overflow-hidden bg-[var(--bg-secondary)] border-[var(--border-color)]">
             <svg
               ref={svgRef}
-              className="w-full h-[700px] bg-gradient-to-br from-gray-50 to-gray-100 cursor-grab active:cursor-grabbing"
+              className={`w-full h-[700px] ${panMode ? 'cursor-grab active:cursor-grabbing' : 'cursor-default'}`}
               viewBox="0 0 800 600"
               style={{
-                transform: `scale(${graphScale}) translate(${graphOffset.x}px, ${graphOffset.y}px)`,
-                transformOrigin: 'center',
+                background: 'linear-gradient(135deg, var(--bg-primary) 0%, var(--bg-secondary) 100%)',
               }}
               onMouseDown={(e) => handleMouseDown(e)}
               onMouseMove={handleMouseMove}
               onMouseUp={handleMouseUp}
-              onMouseLeave={handleMouseUp}
+              onMouseLeave={handleMouseLeave}
             >
               <defs>
                 {/* 箭头标记 */}
@@ -880,141 +1010,146 @@ export function EnhancedCharacterNetwork() {
                 </filter>
               </defs>
 
-              {/* 关系连线 */}
-              {links.map((link) => {
-                const source = nodes.find(n => n.id === link.source)
-                const target = nodes.find(n => n.id === link.target)
-                if (!source || !target) return null
+              <g transform={`translate(${graphOffset.x}, ${graphOffset.y}) scale(${graphScale})`}>
+                {/* 关系连线 */}
+                {links.map((link) => {
+                  const sourceNode = nodes.find(n => n.id === link.source)
+                  const targetNode = nodes.find(n => n.id === link.target)
+                  const sourcePos = nodePositions.get(link.source)
+                  const targetPos = nodePositions.get(link.target)
 
-                const dx = target.x - source.x
-                const dy = target.y - source.y
-                const distance = Math.sqrt(dx * dx + dy * dy)
+                  if (!sourceNode || !targetNode || !sourcePos || !targetPos) return null
 
-                const sourceX = source.x + (dx / distance) * source.radius
-                const sourceY = source.y + (dy / distance) * source.radius
-                const targetX = target.x - (dx / distance) * target.radius
-                const targetY = target.y - (dy / distance) * target.radius
+                  const dx = targetPos.x - sourcePos.x
+                  const dy = targetPos.y - sourcePos.y
+                  const distance = Math.sqrt(dx * dx + dy * dy) || 1
 
-                const midX = (sourceX + targetX) / 2
-                const midY = (sourceY + targetY) / 2
+                  const sourceX = sourcePos.x + (dx / distance) * sourceNode.radius
+                  const sourceY = sourcePos.y + (dy / distance) * sourceNode.radius
+                  const targetX = targetPos.x - (dx / distance) * targetNode.radius
+                  const targetY = targetPos.y - (dy / distance) * targetNode.radius
 
-                // 贝塞尔曲线控制点
-                const curveAmount = Math.min(50, distance / 3)
-                const controlX = midX + (dy / distance) * curveAmount
-                const controlY = midY - (dx / distance) * curveAmount
+                  const midX = (sourceX + targetX) / 2
+                  const midY = (sourceY + targetY) / 2
 
-                return (
-                  <g key={link.id}>
-                    <path
-                      d={`M ${sourceX} ${sourceY} Q ${controlX} ${controlY} ${targetX} ${targetY}`}
-                      fill="none"
-                      stroke={link.config.color}
-                      strokeWidth={2 + link.weight * 0.5}
-                      strokeOpacity={0.7}
-                      markerEnd={`url(#arrowhead-${Object.keys(RELATIONSHIP_CONFIGS).find(k => RELATIONSHIP_CONFIGS[k as keyof typeof RELATIONSHIP_CONFIGS] === link.config)})`}
-                    />
-                    {showLabels && (
-                      <text
-                        x={midX}
-                        y={midY - 8}
-                        textAnchor="middle"
-                        className="text-xs fill-gray-700 font-medium"
-                        style={{ fontSize: '11px' }}
-                      >
-                        {link.relationship}
-                      </text>
-                    )}
-                  </g>
-                )
-              })}
+                  const curveAmount = Math.min(50, distance / 3)
+                  const controlX = midX + (dy / distance) * curveAmount
+                  const controlY = midY - (dx / distance) * curveAmount
 
-              {/* 节点 */}
-              {nodes.map(node => {
-                const isSelected = selectedCharacter?.id === node.id
-                return (
-                  <g
-                    key={node.id}
-                    transform={`translate(${node.x}, ${node.y})`}
-                    className="cursor-pointer"
-                    onClick={() => {
-                      const char = characters.find(c => c.id === node.id)
-                      if (char) handleEdit(char)
-                    }}
-                  >
-                    {/* 节点外圈 */}
-                    <circle
-                      r={node.radius + 3}
-                      fill={isSelected ? '#3b82f6' : node.color}
-                      opacity={0.2}
-                    />
+                  return (
+                    <g key={link.id}>
+                      <path
+                        d={`M ${sourceX} ${sourceY} Q ${controlX} ${controlY} ${targetX} ${targetY}`}
+                        fill="none"
+                        stroke={link.config.color}
+                        strokeWidth={2 + link.weight * 0.5}
+                        strokeOpacity={0.7}
+                        markerEnd={`url(#arrowhead-${Object.keys(RELATIONSHIP_CONFIGS).find(k => RELATIONSHIP_CONFIGS[k as keyof typeof RELATIONSHIP_CONFIGS] === link.config)})`}
+                      />
+                      {showLabels && (
+                        <text
+                          x={midX}
+                          y={midY - 8}
+                          textAnchor="middle"
+                          className="text-xs fill-gray-400 font-medium"
+                          style={{ fontSize: '11px' }}
+                        >
+                          {link.relationship}
+                        </text>
+                      )}
+                    </g>
+                  )
+                })}
 
-                    {/* 节点 */}
-                    <circle
-                      r={node.radius}
-                      fill={node.color}
-                      filter="url(#glow)"
-                      className="transition-all duration-300 hover:r-3"
-                      style={{ r: node.radius }}
-                    />
+                {/* 节点 */}
+                {nodes.map(node => {
+                  const pos = nodePositions.get(node.id)
+                  if (!pos) return null
 
-                    {/* 节点边框 */}
-                    <circle
-                      r={node.radius - 1}
-                      fill="white"
-                      stroke={node.color}
-                      strokeWidth={2}
-                    />
-
-                    {/* 节点标签 */}
-                    {showLabels && (
-                      <text
-                        y={node.radius + 16}
-                        textAnchor="middle"
-                        className="text-sm font-medium fill-gray-700"
-                        style={{ fontSize: '12px' }}
-                      >
-                        {node.name.length > 8 ? node.name.slice(0, 8) + '…' : node.name}
-                      </text>
-                    )}
-
-                    {/* 角色标签 */}
-                    <text
-                      textAnchor="middle"
-                      dy="0.3em"
-                      className="text-xs font-bold"
-                      style={{
-                        fill: node.color,
-                        fontSize: Math.min(12, node.radius * 0.5) + 'px',
+                  const isSelected = selectedCharacter?.id === node.id
+                  return (
+                    <g
+                      key={node.id}
+                      transform={`translate(${pos.x}, ${pos.y})`}
+                      className={`${dragNode === node.id ? 'cursor-grabbing' : 'cursor-pointer'}`}
+                      onMouseDown={(e) => handleMouseDown(e, node.id)}
+                      onClick={() => {
+                        const char = characters.find(c => c.id === node.id)
+                        if (char) handleEdit(char)
                       }}
                     >
-                      {node.role === 'protagonist' ? '主' :
-                       node.role === 'antagonist' ? '反' :
-                       node.role === 'mentor' ? '师' :
-                       node.role === 'deuteragonist' ? '副' :
-                       node.name.charAt(0)}
-                    </text>
-                  </g>
-                )
-              })}
+                      <circle
+                        r={node.radius + 3}
+                        fill={isSelected ? '#3b82f6' : node.color}
+                        opacity={0.3}
+                      />
+
+                      <circle
+                        r={node.radius}
+                        fill={node.color}
+                        filter="url(#glow)"
+                        style={{
+                          transition: dragNode === node.id ? 'none' : 'all 0.3s',
+                          cursor: dragNode === node.id ? 'grabbing' : 'grab'
+                        }}
+                      />
+
+                      <circle
+                        r={node.radius - 1}
+                        fill="#1e1e1e"
+                        stroke={node.color}
+                        strokeWidth={2}
+                      />
+
+                      {showLabels && (
+                        <text
+                          y={node.radius + 16}
+                          textAnchor="middle"
+                          className="text-sm font-medium fill-[var(--text-primary)]"
+                          style={{ fontSize: '12px' }}
+                        >
+                          {node.name.length > 8 ? node.name.slice(0, 8) + '…' : node.name}
+                        </text>
+                      )}
+
+                      <text
+                        textAnchor="middle"
+                        dy="0.3em"
+                        className="text-xs font-bold"
+                        style={{
+                          fill: node.color,
+                          fontSize: Math.min(12, node.radius * 0.5) + 'px',
+                        }}
+                      >
+                        {node.role === 'protagonist' ? '主' :
+                         node.role === 'antagonist' ? '反' :
+                         node.role === 'mentor' ? '师' :
+                         node.role === 'deuteragonist' ? '副' :
+                         node.name.charAt(0)}
+                      </text>
+                    </g>
+                  )
+                })}
+              </g>
             </svg>
 
             {/* 图例 */}
-            <div className="absolute bottom-4 left-4 bg-white/90 backdrop-blur-sm rounded-lg p-3 shadow-lg">
-              <div className="text-xs font-medium text-gray-700 mb-2">关系类型</div>
+            <div className="absolute bottom-4 left-4 bg-[var(--bg-primary)]/95 backdrop-blur-sm rounded-lg p-3 shadow-lg border border-[var(--border-color)]">
+              <div className="text-xs font-medium text-[var(--text-primary)] mb-2">关系类型</div>
               <div className="space-y-1">
                 {Object.entries(RELATIONSHIP_CONFIGS).map(([key, config]) => (
                   <div key={key} className="flex items-center gap-2 text-xs">
                     <div className="w-3 h-3 rounded-full" style={{ backgroundColor: config.color }} />
-                    <span className="text-gray-600">{config.icon} {config.types[0]}等</span>
+                    <span className="text-[var(--text-muted)]">{config.icon} {config.types[0]}等</span>
                   </div>
                 ))}
               </div>
             </div>
 
             {/* 关系统计 */}
-            <div className="absolute top-4 right-4 bg-white/90 backdrop-blur-sm rounded-lg p-3 shadow-lg">
-              <div className="text-xs font-medium text-gray-700 mb-2">网络统计</div>
-              <div className="space-y-1 text-xs text-gray-600">
+            <div className="absolute top-4 right-4 bg-[var(--bg-primary)]/95 backdrop-blur-sm rounded-lg p-3 shadow-lg border border-[var(--border-color)]">
+              <div className="text-xs font-medium text-[var(--text-primary)] mb-2">网络统计</div>
+              <div className="space-y-1 text-xs text-[var(--text-muted)]">
                 <div>人物: {nodes.length}</div>
                 <div>关系: {links.length}</div>
                 <div>密度: {((2 * links.length) / (nodes.length * (nodes.length - 1)) * 100).toFixed(1)}%</div>
@@ -1025,17 +1160,17 @@ export function EnhancedCharacterNetwork() {
 
         {/* 矩阵视图 */}
         {activeTab === 'matrix' && (
-          <Card className="overflow-x-auto">
+          <Card className="overflow-x-auto bg-[var(--bg-secondary)] border-[var(--border-color)]">
             <div className="p-4">
-              <h3 className="text-lg font-medium text-gray-900 mb-4">关系矩阵</h3>
+              <h3 className="text-lg font-medium text-[var(--text-primary)] mb-4">关系矩阵</h3>
               {nodes.length > 0 ? (
                 <div className="overflow-auto">
                   <table className="border-collapse">
                     <thead>
                       <tr>
-                        <th className="border p-2 bg-gray-50 sticky left-0 z-10"></th>
+                        <th className="border border-[var(--border-color)] p-2 bg-[var(--bg-primary)] sticky left-0 z-10"></th>
                         {nodes.map(node => (
-                          <th key={node.id} className="border p-2 bg-gray-50 text-xs font-medium">
+                          <th key={node.id} className="border border-[var(--border-color)] p-2 bg-[var(--bg-primary)] text-xs font-medium text-[var(--text-primary)]">
                             {node.name}
                           </th>
                         ))}
@@ -1044,7 +1179,7 @@ export function EnhancedCharacterNetwork() {
                     <tbody>
                       {nodes.map(sourceNode => (
                         <tr key={sourceNode.id}>
-                          <td className="border p-2 bg-gray-50 sticky left-0 z-10 text-xs font-medium">
+                          <td className="border border-[var(--border-color)] p-2 bg-[var(--bg-primary)] sticky left-0 z-10 text-xs font-medium text-[var(--text-primary)]">
                             {sourceNode.name}
                           </td>
                           {nodes.map(targetNode => {
@@ -1056,7 +1191,7 @@ export function EnhancedCharacterNetwork() {
 
                             if (sourceNode.id === targetNode.id) {
                               return (
-                                <td key={targetNode.id} className="border p-1 bg-gray-100 w-8 h-8" />
+                                <td key={targetNode.id} className="border border-[var(--border-color)] p-1 bg-[var(--bg-primary)] w-8 h-8" />
                               )
                             }
 
@@ -1064,7 +1199,7 @@ export function EnhancedCharacterNetwork() {
                               return (
                                 <td
                                   key={targetNode.id}
-                                  className="border p-1 w-8 h-8 text-center cursor-pointer"
+                                  className="border border-[var(--border-color)] p-1 w-8 h-8 text-center cursor-pointer"
                                   style={{ backgroundColor: link.config.color + '30' }}
                                   title={link.relationship}
                                 >
@@ -1078,7 +1213,7 @@ export function EnhancedCharacterNetwork() {
                             return (
                               <td
                                 key={targetNode.id}
-                                className="border p-1 w-8 h-8 hover:bg-gray-50 cursor-pointer"
+                                className="border border-[var(--border-color)] p-1 w-8 h-8 hover:bg-[var(--bg-primary)] cursor-pointer"
                                 title="点击添加关系"
                               />
                             )
@@ -1089,7 +1224,7 @@ export function EnhancedCharacterNetwork() {
                   </table>
                 </div>
               ) : (
-                <div className="text-center py-12 text-gray-500">
+                <div className="text-center py-12 text-[var(--text-muted)]">
                   添加人物后显示关系矩阵
                 </div>
               )}
@@ -1122,11 +1257,13 @@ export function EnhancedCharacterNetwork() {
             value={formData.name}
             onChange={(e) => setFormData({ ...formData, name: e.target.value })}
             required
+            className="bg-[var(--bg-primary)] border-[var(--border-color)] text-[var(--text-primary)] placeholder:text-[var(--text-muted)]"
           />
           <Select
             label="角色"
             value={formData.role}
             onChange={(e) => setFormData({ ...formData, role: e.target.value })}
+            className="bg-[var(--bg-primary)] border-[var(--border-color)] text-[var(--text-primary)]"
           >
             <option value="">选择角色</option>
             {ROLE_OPTIONS.map(opt => (
@@ -1139,6 +1276,7 @@ export function EnhancedCharacterNetwork() {
             value={formData.appearance}
             onChange={(e) => setFormData({ ...formData, appearance: e.target.value })}
             rows={2}
+            className="bg-[var(--bg-primary)] border-[var(--border-color)] text-[var(--text-primary)] placeholder:text-[var(--text-muted)]"
           />
           <Textarea
             label="性格"
@@ -1146,6 +1284,7 @@ export function EnhancedCharacterNetwork() {
             value={formData.personality}
             onChange={(e) => setFormData({ ...formData, personality: e.target.value })}
             rows={2}
+            className="bg-[var(--bg-primary)] border-[var(--border-color)] text-[var(--text-primary)] placeholder:text-[var(--text-muted)]"
           />
           <Textarea
             label="背景"
@@ -1153,6 +1292,7 @@ export function EnhancedCharacterNetwork() {
             value={formData.background}
             onChange={(e) => setFormData({ ...formData, background: e.target.value })}
             rows={3}
+            className="bg-[var(--bg-primary)] border-[var(--border-color)] text-[var(--text-primary)] placeholder:text-[var(--text-muted)]"
           />
           <div className="grid grid-cols-2 gap-4">
             <Textarea
@@ -1161,6 +1301,7 @@ export function EnhancedCharacterNetwork() {
               value={formData.goals}
               onChange={(e) => setFormData({ ...formData, goals: e.target.value })}
               rows={2}
+              className="bg-[var(--bg-primary)] border-[var(--border-color)] text-[var(--text-primary)] placeholder:text-[var(--text-muted)]"
             />
             <Textarea
               label="缺陷"
@@ -1168,6 +1309,7 @@ export function EnhancedCharacterNetwork() {
               value={formData.flaws}
               onChange={(e) => setFormData({ ...formData, flaws: e.target.value })}
               rows={2}
+              className="bg-[var(--bg-primary)] border-[var(--border-color)] text-[var(--text-primary)] placeholder:text-[var(--text-muted)]"
             />
           </div>
         </form>
@@ -1191,14 +1333,15 @@ export function EnhancedCharacterNetwork() {
       >
         <div className="space-y-4">
           {selectedCharacter && (
-            <div className="text-sm text-gray-600">
-              为 <span className="font-medium text-gray-900">{selectedCharacter.name}</span> 添加关系
+            <div className="text-sm text-[var(--text-muted)]">
+              为 <span className="font-medium text-[var(--text-primary)]">{selectedCharacter.name}</span> 添加关系
             </div>
           )}
           <Select
             label="目标人物"
             value={relationTarget}
             onChange={(e) => setRelationTarget(e.target.value)}
+            className="bg-[var(--bg-primary)] border-[var(--border-color)] text-[var(--text-primary)]"
           >
             <option value="">选择目标人物</option>
             {characters.filter(c => c.id !== selectedCharacter?.id).map(char => (
@@ -1209,6 +1352,7 @@ export function EnhancedCharacterNetwork() {
             label="关系类型"
             value={relationType}
             onChange={(e) => setRelationType(e.target.value)}
+            className="bg-[var(--bg-primary)] border-[var(--border-color)] text-[var(--text-primary)]"
           >
             <option value="">选择关系类型</option>
             {ALL_RELATIONSHIP_TYPES.map(type => (
@@ -1223,6 +1367,7 @@ export function EnhancedCharacterNetwork() {
             value={relationDescription}
             onChange={(e) => setRelationDescription(e.target.value)}
             rows={2}
+            className="bg-[var(--bg-primary)] border-[var(--border-color)] text-[var(--text-primary)] placeholder:text-[var(--text-muted)]"
           />
         </div>
       </Modal>
@@ -1265,36 +1410,46 @@ export function EnhancedCharacterNetwork() {
             value={aiPrompt}
             onChange={(e) => setAiPrompt(e.target.value)}
             rows={4}
+            className="bg-[var(--bg-primary)] border-[var(--border-color)] text-[var(--text-primary)] placeholder:text-[var(--text-muted)]"
           />
           {aiGeneratedCharacter && (
-            <div className="bg-gray-50 rounded-lg p-4 space-y-3">
-              <h4 className="font-medium text-gray-900">生成结果</h4>
+            <div className="bg-[var(--bg-primary)] rounded-lg p-4 space-y-3 border border-[var(--border-color)]">
+              <h4 className="font-medium text-[var(--text-primary)]">生成结果</h4>
               <div className="grid grid-cols-2 gap-3 text-sm">
                 <div>
-                  <span className="text-gray-500">姓名:</span>{' '}
+                  <span className="text-[var(--text-muted)]">姓名:</span>{' '}
                   <span className="font-medium">{aiGeneratedCharacter.name}</span>
                 </div>
                 <div>
-                  <span className="text-gray-500">角色:</span>{' '}
+                  <span className="text-[var(--text-muted)]">角色:</span>{' '}
                   <span className="font-medium">{aiGeneratedCharacter.role}</span>
                 </div>
                 <div className="col-span-2">
-                  <span className="text-gray-500">外貌:</span>{' '}
-                  <span>{aiGeneratedCharacter.appearance}</span>
+                  <span className="text-[var(--text-muted)]">外貌:</span>{' '}
+                  <span className="text-[var(--text-secondary)]">{aiGeneratedCharacter.appearance}</span>
                 </div>
                 <div className="col-span-2">
-                  <span className="text-gray-500">性格:</span>{' '}
-                  <span>{aiGeneratedCharacter.personality}</span>
+                  <span className="text-[var(--text-muted)]">性格:</span>{' '}
+                  <span className="text-[var(--text-secondary)]">{aiGeneratedCharacter.personality}</span>
                 </div>
                 <div className="col-span-2">
-                  <span className="text-gray-500">背景:</span>{' '}
-                  <span>{aiGeneratedCharacter.background}</span>
+                  <span className="text-[var(--text-muted)]">背景:</span>{' '}
+                  <span className="text-[var(--text-secondary)]">{aiGeneratedCharacter.background}</span>
                 </div>
               </div>
             </div>
           )}
         </div>
       </Modal>
+
+      {/* Delete confirmation modal */}
+      <DeleteConfirmModal
+        isOpen={deleteModal.isOpen}
+        onClose={() => setDeleteModal({ isOpen: false, character: null })}
+        onConfirm={confirmDelete}
+        title={`确定要删除「${deleteModal.character?.name || ''}」吗？`}
+        message="此操作无法撤销。"
+      />
     </div>
   )
 }

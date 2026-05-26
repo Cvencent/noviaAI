@@ -16,7 +16,7 @@ import { Card } from '../components/ui/Card'
 import { Input } from '../components/ui/Input'
 import { Textarea } from '../components/ui/Textarea'
 import { Modal } from '../components/ui/Modal'
-import { Select } from '../components/ui/Select'
+import { DeleteConfirmModal } from '../components/DeleteConfirmModal'
 import {
   turningPointsApi,
   TurningPoint,
@@ -24,12 +24,12 @@ import {
 } from '../api/turning-points'
 
 const TURNING_POINT_TYPES = [
-  { value: 'INCITING_INCIDENT', label: '激励事件', color: 'bg-blue-100 text-blue-700', icon: Zap },
-  { value: 'RISING_ESCALATION', label: '升级递进', color: 'bg-green-100 text-green-700', icon: TrendingUp },
-  { value: 'CRISIS', label: '危机', color: 'bg-orange-100 text-orange-700', icon: AlertTriangle },
-  { value: 'CLIMAX', label: '高潮', color: 'bg-red-100 text-red-700', icon: Flame },
-  { value: 'RESOLUTION', label: '结局', color: 'bg-purple-100 text-purple-700', icon: Heart },
-  { value: 'MIDPOINT_REVERSAL', label: '中点反转', color: 'bg-yellow-100 text-yellow-700', icon: Target },
+  { value: 'INCITING_INCIDENT', label: '激励事件', color: 'bg-blue-900/30 text-blue-400', icon: Zap },
+  { value: 'RISING_ESCALATION', label: '升级递进', color: 'bg-green-900/30 text-green-400', icon: TrendingUp },
+  { value: 'CRISIS', label: '危机', color: 'bg-orange-900/30 text-orange-400', icon: AlertTriangle },
+  { value: 'CLIMAX', label: '高潮', color: 'bg-red-900/30 text-red-400', icon: Flame },
+  { value: 'RESOLUTION', label: '结局', color: 'bg-purple-900/30 text-purple-400', icon: Heart },
+  { value: 'MIDPOINT_REVERSAL', label: '中点反转', color: 'bg-yellow-900/30 text-yellow-400', icon: Target },
 ]
 
 export function TurningPointManagement() {
@@ -40,6 +40,7 @@ export function TurningPointManagement() {
   const [isModalOpen, setIsModalOpen] = useState(false)
   const [modalMode, setModalMode] = useState<'create' | 'edit'>('create')
   const [editingPoint, setEditingPoint] = useState<TurningPoint | null>(null)
+  const [deleteModal, setDeleteModal] = useState<{ isOpen: boolean; point: TurningPoint | null }>({ isOpen: false, point: null })
 
   const [formData, setFormData] = useState<CreateTurningPointDto>({
     title: '',
@@ -95,12 +96,18 @@ export function TurningPointManagement() {
   }
 
   const handleDelete = async (point: TurningPoint) => {
-    if (!projectId || !confirm(`确定要删除转折点「${point.title}」吗？`)) return
+    setDeleteModal({ isOpen: true, point })
+  }
+
+  const handleConfirmDelete = async () => {
+    if (!projectId || !deleteModal.point) return
     try {
-      await turningPointsApi.delete(projectId, point.id)
+      await turningPointsApi.delete(projectId, deleteModal.point.id)
       await loadTurningPoints()
     } catch (error) {
       console.error('删除失败:', error)
+    } finally {
+      setDeleteModal({ isOpen: false, point: null })
     }
   }
 
@@ -134,19 +141,19 @@ export function TurningPointManagement() {
 
   if (isLoading) {
     return (
-      <div className="p-8 flex items-center justify-center">
-        <div className="text-gray-500">加载中...</div>
+      <div className="h-full bg-[var(--bg-primary)] p-4 flex items-center justify-center overflow-y-auto">
+        <div className="text-[var(--text-muted)]">加载中...</div>
       </div>
     )
   }
 
   return (
-    <div className="min-h-screen bg-gray-50 p-6">
+    <div className="h-full bg-[var(--bg-primary)] p-4 overflow-y-auto">
       <div className="max-w-5xl mx-auto">
         <div className="flex justify-between items-center mb-6">
           <div>
-            <h1 className="text-2xl font-bold text-gray-900">转折点管理</h1>
-            <p className="text-gray-600 mt-1">规划和管理故事的关键转折点</p>
+            <h1 className="text-2xl font-bold text-[var(--text-primary)]">转折点管理</h1>
+            <p className="text-[var(--text-muted)] mt-1">标记和管理故事中的关键转折点</p>
           </div>
           <Button onClick={handleCreate}>
             <Plus className="w-4 h-4 mr-2" />
@@ -167,8 +174,8 @@ export function TurningPointManagement() {
                     <span className={`p-1.5 rounded-lg ${type.color}`}>
                       <TypeIcon className="w-4 h-4" />
                     </span>
-                    <h2 className="text-lg font-semibold text-gray-900">{type.label}</h2>
-                    <span className="text-sm text-gray-400">({points.length})</span>
+                    <h2 className="text-sm font-semibold text-[var(--text-primary)]">{type.label}</h2>
+                    <span className="text-xs text-[var(--text-muted)]">({points.length})</span>
                   </div>
 
                   <div className="space-y-3">
@@ -177,25 +184,25 @@ export function TurningPointManagement() {
                         <div className="flex justify-between items-start">
                           <div className="flex-1">
                             <div className="flex items-center gap-3 mb-2">
-                              <span className="text-sm font-medium text-gray-400">#{index + 1}</span>
-                              <h3 className="font-medium text-gray-900">{point.title}</h3>
+                              <span className="text-sm font-medium text-[var(--text-muted)]">#{index + 1}</span>
+                              <h3 className="font-medium text-[var(--text-primary)]">{point.title}</h3>
                               {point.position && (
-                                <span className="text-xs px-2 py-0.5 rounded bg-gray-100 text-gray-500">
+                                <span className="text-xs px-2 py-0.5 rounded bg-[var(--bg-tertiary)] text-[var(--text-secondary)]">
                                   {point.position}
                                 </span>
                               )}
                             </div>
                             {point.description && (
-                              <p className="text-sm text-gray-600 mt-1">{point.description}</p>
+                              <p className="text-sm text-[var(--text-secondary)] mt-1">{point.description}</p>
                             )}
                             <div className="flex flex-wrap gap-3 mt-2">
                               {point.impact && (
-                                <div className="text-xs text-gray-500">
+                                <div className="text-xs text-[var(--text-muted)]">
                                   <span className="font-medium">影响:</span> {point.impact}
                                 </div>
                               )}
                               {point.emotionalShift && (
-                                <div className="text-xs text-gray-500">
+                                <div className="text-xs text-[var(--text-muted)]">
                                   <span className="font-medium">情感变化:</span> {point.emotionalShift}
                                 </div>
                               )}
@@ -204,13 +211,13 @@ export function TurningPointManagement() {
                           <div className="flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity ml-4">
                             <button
                               onClick={() => handleEdit(point)}
-                              className="p-1 text-gray-400 hover:text-blue-600"
+                              className="p-1 text-[var(--text-muted)] hover:text-[var(--accent-color)]"
                             >
                               <Edit2 className="w-4 h-4" />
                             </button>
                             <button
                               onClick={() => handleDelete(point)}
-                              className="p-1 text-gray-400 hover:text-red-600"
+                              className="p-1 text-[var(--text-muted)] hover:text-red-400"
                             >
                               <Trash2 className="w-4 h-4" />
                             </button>
@@ -225,9 +232,9 @@ export function TurningPointManagement() {
           </div>
         ) : (
           <Card className="p-12 text-center">
-            <Zap className="w-16 h-16 mx-auto text-gray-300 mb-4" />
-            <h3 className="text-lg font-medium text-gray-900 mb-2">还没有转折点</h3>
-            <p className="text-gray-500 mb-4">添加故事的关键转折点来规划情节发展</p>
+            <Zap className="w-16 h-16 mx-auto text-[var(--text-muted)] mb-4" />
+            <h3 className="text-lg font-medium text-[var(--text-primary)] mb-2">还没有转折点</h3>
+            <p className="text-[var(--text-muted)] mb-4">添加故事的关键转折点来规划情节发展</p>
             <Button onClick={handleCreate}>
               <Plus className="w-4 h-4 mr-2" />
               添加转折点
@@ -243,7 +250,7 @@ export function TurningPointManagement() {
       >
         <div className="space-y-4">
           <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">标题 *</label>
+            <label className="block text-sm font-medium text-[var(--text-secondary)] mb-1">标题 *</label>
             <Input
               value={formData.title}
               onChange={(e) => setFormData({ ...formData, title: e.target.value })}
@@ -253,16 +260,18 @@ export function TurningPointManagement() {
 
           <div className="grid grid-cols-2 gap-4">
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">类型</label>
-              <Select
+              <label className="block text-sm font-medium text-[var(--text-secondary)] mb-2">
+                转折点类型
+              </label>
+              <select
                 value={formData.type}
                 onChange={(e) => setFormData({ ...formData, type: e.target.value })}
-                className="w-full"
+                className="w-full px-3 py-2 bg-[var(--bg-primary)] border border-[var(--border-color)] rounded-lg text-[var(--text-primary)] focus:outline-none focus:border-[var(--accent-color)]"
               >
                 {TURNING_POINT_TYPES.map(type => (
                   <option key={type.value} value={type.value}>{type.label}</option>
                 ))}
-              </Select>
+              </select>
             </div>
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1">位置</label>
@@ -285,7 +294,7 @@ export function TurningPointManagement() {
           </div>
 
           <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">影响</label>
+            <label className="block text-sm font-medium text-[var(--text-secondary)] mb-1">备注</label>
             <Textarea
               value={formData.impact}
               onChange={(e) => setFormData({ ...formData, impact: e.target.value })}
@@ -304,13 +313,21 @@ export function TurningPointManagement() {
           </div>
         </div>
 
-        <div className="flex justify-end gap-3 pt-4 border-t mt-4">
+        <div className="flex justify-end gap-3 pt-4 border-t border-[var(--border-color)]">
           <Button variant="outline" onClick={() => setIsModalOpen(false)}>取消</Button>
           <Button onClick={handleSubmit} disabled={!formData.title.trim()}>
             {modalMode === 'create' ? '添加' : '保存'}
           </Button>
         </div>
       </Modal>
+
+      <DeleteConfirmModal
+        isOpen={deleteModal.isOpen}
+        onClose={() => setDeleteModal({ isOpen: false, point: null })}
+        onConfirm={handleConfirmDelete}
+        title={`确定要删除转折点「${deleteModal.point?.title || ''}」吗？`}
+        message="删除后将无法恢复，请谨慎操作"
+      />
     </div>
   )
 }

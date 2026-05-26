@@ -355,11 +355,11 @@ export function StorySystemPanel({
     <div className="h-full flex flex-col bg-white">
       <div className="p-4 border-b border-gray-200 flex items-center justify-between">
         <div>
-          <h3 className="font-semibold text-gray-900 flex items-center gap-2">
+          <h3 className="font-semibold text-[var(--text-primary)] flex items-center gap-2">
             <Activity className="w-5 h-5 text-indigo-600" />
             Story System
           </h3>
-          <p className="text-xs text-gray-500 mt-1">合同、预检、Agent loop、审查、提交和投影</p>
+          <p className="text-xs text-[var(--text-muted)] mt-1">合同、预检、Agent loop、审查、提交和投影</p>
         </div>
         <Button variant="ghost" size="sm" onClick={onClose} className="p-1">
           <X className="w-5 h-5" />

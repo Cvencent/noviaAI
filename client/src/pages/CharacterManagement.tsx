@@ -1,99 +1,41 @@
-import { useState, useEffect, useRef, useCallback } from 'react'
-import { useParams } from 'react-router-dom'
+import { useEffect, useState } from 'react';
+import { useParams } from 'react-router-dom';
 import {
   Plus,
   Edit2,
   Trash2,
   Users,
-  Sparkles,
-  ZoomIn,
-  ZoomOut,
-} from 'lucide-react'
-import { Button } from '../components/ui/Button'
-import { Card } from '../components/ui/Card'
-import { Input } from '../components/ui/Input'
-import { Textarea } from '../components/ui/Textarea'
-import { Modal } from '../components/ui/Modal'
-import { Select } from '../components/ui/Select'
-import { charactersApi, Character } from '../api/characters';
-import { STREAM_ENDPOINTS } from '../api/ai';
-import { useStream } from '../hooks/useStream';
+  UserCircle,
+  Loader2,
+  Search,
+} from 'lucide-react';
+import { Button } from '../components/ui/Button';
+import { Card } from '../components/ui/Card';
+import { Input } from '../components/ui/Input';
+import { Textarea } from '../components/ui/Textarea';
+import { Modal } from '../components/ui/Modal';
+import { DeleteConfirmModal } from '../components/DeleteConfirmModal';
+import { charactersApi, type Character } from '../api/characters';
+import { useToast } from '../contexts/ToastContext';
 
-const ROLE_OPTIONS = [
-  { value: 'protagonist', label: '主角' },
-  { value: 'deuteragonist', label: '副主角' },
-  { value: 'antagonist', label: '反派' },
-  { value: 'supporting', label: '配角' },
-  { value: 'minor', label: '次要角色' },
-  { value: 'mentor', label: '导师' },
-  { value: 'love_interest', label: '恋人' },
-  { value: 'friend', label: '朋友' },
-  { value: 'rival', label: '对手' },
-  { value: 'other', label: '其他' },
-]
+const ROLE_CONFIG: Record<string, { label: string; color: string }> = {
+  protagonist: { label: '主角', color: 'bg-blue-500/20 text-blue-400' },
+  antagonist: { label: '反派', color: 'bg-red-500/20 text-red-400' },
+  supporting: { label: '配角', color: 'bg-green-500/20 text-green-400' },
+  minor: { label: '龙套', color: 'bg-gray-500/20 text-gray-400' },
+};
 
-const RELATIONSHIP_TYPES = [
-  '父亲', '母亲', '儿子', '女儿', '兄弟', '姐妹', '夫妻', '恋人',
-  '朋友', '敌人', '导师', '学生', '上司', '下属', '搭档', '同门',
-  '青梅竹马', '养父', '养女', '宿敌', '恩人', '仇人', '竞争者'
-]
-
-interface CharacterFormData {
-  name: string
-  role: string
-  appearance: string
-  personality: string
-  background: string
-  goals: string
-  flaws: string
-  arc: string
-  voice: string
-  notes: string
-}
-
-interface GraphNode {
-  id: string
-  name: string
-  role: string
-  x: number
-  y: number
-  fx?: number
-  fy?: number
-}
-
-interface GraphLink {
-  source: string
-  target: string
-  relationship: string
-}
-
-export function CharacterManagement() {
-  const { projectId } = useParams<{ projectId: string }>()
-  const svgRef = useRef<SVGSVGElement>(null)
-
-  const [characters, setCharacters] = useState<Character[]>([])
-  const [selectedCharacter, setSelectedCharacter] = useState<Character | null>(null)
-  const [isModalOpen, setIsModalOpen] = useState(false)
-  const [modalMode, setModalMode] = useState<'create' | 'edit'>('create')
-  const [isLoading, setIsLoading] = useState(true)
-  const [searchQuery, setSearchQuery] = useState('')
-  const [filterRole, setFilterRole] = useState('')
-
-  const [showRelationModal, setShowRelationModal] = useState(false)
-  const [relationTarget, setRelationTarget] = useState('')
-  const [relationType, setRelationType] = useState('')
-  const [relationDescription, setRelationDescription] = useState('')
-
-  const [showAiModal, setShowAiModal] = useState(false)
-  const [aiPrompt, setAiPrompt] = useState('')
-  const [aiGeneratedCharacter, setAiGeneratedCharacter] = useState<CharacterFormData | null>(null)
-
-  const [activeTab, setActiveTab] = useState<'list' | 'graph'>('list')
-  const [graphScale, setGraphScale] = useState(1)
-
-  const [formData, setFormData] = useState<CharacterFormData>({
+export const CharacterManagement: React.FC = () => {
+  const { projectId } = useParams<{ projectId: string }>();
+  const [characters, setCharacters] = useState<Character[]>([]);
+  const [isLoading, setIsLoading] = useState(false);
+  const [showCreateModal, setShowCreateModal] = useState(false);
+  const [editingCharacter, setEditingCharacter] = useState<Character | null>(null);
+  const [searchQuery, setSearchQuery] = useState('');
+  const [deleteModal, setDeleteModal] = useState<{ isOpen: boolean; character: Character | null }>({ isOpen: false, character: null });
+  const [formData, setFormData] = useState({
     name: '',
-    role: '',
+    role: 'supporting',
     appearance: '',
     personality: '',
     background: '',
@@ -102,52 +44,72 @@ export function CharacterManagement() {
     arc: '',
     voice: '',
     notes: '',
-  })
-
-  const [aiStreamedText, setAiStreamedText] = useState('')
-
-  const { isStreaming, streamedText, error: streamError, startStream, reset } = useStream({
-    endpoint: STREAM_ENDPOINTS.CHAT,
-    onComplete: (fullText) => {
-      try {
-        const jsonMatch = fullText.match(/\{[\s\S]*\}/)
-        if (jsonMatch) {
-          const parsed = JSON.parse(jsonMatch[0])
-          setAiGeneratedCharacter(parsed)
-        }
-      } catch {
-        console.error('解析AI返回失败')
-      }
-    },
-  })
+  });
+  const { showToast } = useToast();
 
   useEffect(() => {
-    if (isStreaming) {
-      setAiStreamedText(streamedText)
-    }
-  }, [isStreaming, streamedText])
+    fetchCharacters();
+  }, [projectId]);
 
-  useEffect(() => {
-    loadCharacters()
-  }, [projectId])
-
-  const loadCharacters = async () => {
-    if (!projectId) return
+  const fetchCharacters = async () => {
+    if (!projectId) return;
+    setIsLoading(true);
     try {
-      const data = await charactersApi.getAll(projectId)
-      setCharacters(data)
+      const data = await charactersApi.getAll(projectId);
+      setCharacters(data);
     } catch (error) {
-      console.error('加载人物失败:', error)
+      showToast({ message: '获取角色列表失败', type: 'error' });
     } finally {
-      setIsLoading(false)
+      setIsLoading(false);
     }
-  }
+  };
 
-  const handleCreate = () => {
-    setModalMode('create')
+  const handleCreate = async () => {
+    if (!projectId || !formData.name.trim()) return;
+    try {
+      await charactersApi.create(projectId, formData);
+      showToast({ message: '角色创建成功', type: 'success' });
+      setShowCreateModal(false);
+      resetForm();
+      fetchCharacters();
+    } catch (error) {
+      showToast({ message: '创建角色失败', type: 'error' });
+    }
+  };
+
+  const handleUpdate = async () => {
+    if (!projectId || !editingCharacter) return;
+    try {
+      await charactersApi.update(projectId, editingCharacter.id, formData);
+      showToast({ message: '角色更新成功', type: 'success' });
+      setEditingCharacter(null);
+      resetForm();
+      fetchCharacters();
+    } catch (error) {
+      showToast({ message: '更新角色失败', type: 'error' });
+    }
+  };
+
+  const handleDelete = async () => {
+    if (!projectId || !deleteModal.character) return;
+    try {
+      await charactersApi.delete(projectId, deleteModal.character.id);
+      showToast({ message: '角色删除成功', type: 'success' });
+      setDeleteModal({ isOpen: false, character: null });
+      fetchCharacters();
+    } catch (error) {
+      showToast({ message: '删除角色失败', type: 'error' });
+    }
+  };
+
+  const handleOpenDeleteModal = (character: Character) => {
+    setDeleteModal({ isOpen: true, character });
+  };
+
+  const resetForm = () => {
     setFormData({
       name: '',
-      role: '',
+      role: 'supporting',
       appearance: '',
       personality: '',
       background: '',
@@ -156,16 +118,14 @@ export function CharacterManagement() {
       arc: '',
       voice: '',
       notes: '',
-    })
-    setIsModalOpen(true)
-  }
+    });
+  };
 
-  const handleEdit = (character: Character) => {
-    setModalMode('edit')
-    setSelectedCharacter(character)
+  const openEditModal = (character: Character) => {
+    setEditingCharacter(character);
     setFormData({
       name: character.name,
-      role: character.role || '',
+      role: character.role || 'supporting',
       appearance: character.appearance || '',
       personality: character.personality || '',
       background: character.background || '',
@@ -174,451 +134,168 @@ export function CharacterManagement() {
       arc: character.arc || '',
       voice: character.voice || '',
       notes: character.notes || '',
-    })
-    setIsModalOpen(true)
-  }
+    });
+  };
 
-  const handleDelete = async (character: Character) => {
-    if (!projectId || !confirm(`确定要删除「${character.name}」吗？`)) return
-    try {
-      await charactersApi.delete(projectId, character.id)
-      await loadCharacters()
-    } catch (error) {
-      console.error('删除失败:', error)
-    }
-  }
-
-  const handleSubmit = async () => {
-    if (!projectId || !formData.name.trim()) return
-
-    try {
-      if (modalMode === 'create') {
-        await charactersApi.create(projectId, formData)
-      } else if (selectedCharacter) {
-        await charactersApi.update(projectId, selectedCharacter.id, formData)
-      }
-      setIsModalOpen(false)
-      await loadCharacters()
-    } catch (error) {
-      console.error('保存失败:', error)
-    }
-  }
-
-  const handleCreateRelation = async () => {
-    if (!projectId || !selectedCharacter || !relationTarget || !relationType) return
-
-    try {
-      await charactersApi.createRelationship(projectId, {
-        fromId: selectedCharacter.id,
-        toId: relationTarget,
-        relationship: relationType,
-        description: relationDescription,
-      })
-      setShowRelationModal(false)
-      setRelationTarget('')
-      setRelationType('')
-      setRelationDescription('')
-      await loadCharacters()
-    } catch (error) {
-      console.error('创建关系失败:', error)
-    }
-  }
-
-  const handleAiGenerate = async () => {
-    if (!aiPrompt.trim()) return
-    setAiGeneratedCharacter(null)
-    setAiStreamedText('')
-    reset()
-
-    await startStream({
-      projectId: projectId!,
-      message: `请根据以下描述生成一个详细的人物设定（返回JSON格式，包含name, role, appearance, personality, background, goals, flaws, arc, voice字段）：\n\n${aiPrompt}`,
-    })
-  }
-
-  const handleApplyAiCharacter = () => {
-    if (aiGeneratedCharacter) {
-      setFormData(aiGeneratedCharacter)
-      setShowAiModal(false)
-      setModalMode('create')
-      setIsModalOpen(true)
-      setAiPrompt('')
-      setAiGeneratedCharacter(null)
-    }
-  }
-
-  const getRoleLabel = (role: string) => {
-    return ROLE_OPTIONS.find(r => r.value === role)?.label || role
-  }
-
-  const getFilteredCharacters = () => {
-    return characters.filter(char => {
-      const matchesSearch = !searchQuery ||
-        char.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-        char.personality?.toLowerCase().includes(searchQuery.toLowerCase())
-      const matchesRole = !filterRole || char.role === filterRole
-      return matchesSearch && matchesRole
-    })
-  }
-
-  const filteredCharacters = getFilteredCharacters()
-
-  const getRelationships = (character: Character) => {
-    const relations: Array<{
-      id: string
-      character: { id: string; name: string }
-      relationship: string
-      description?: string
-      direction: 'from' | 'to'
-    }> = []
-
-    character.relationshipsFrom?.forEach(rel => {
-      if (rel.toCharacter) {
-        relations.push({
-          id: rel.id,
-          character: rel.toCharacter,
-          relationship: rel.relationship,
-          description: rel.description || undefined,
-          direction: 'from',
-        })
-      }
-    })
-
-    character.relationshipsTo?.forEach(rel => {
-      if (rel.fromCharacter) {
-        relations.push({
-          id: rel.id,
-          character: rel.fromCharacter,
-          relationship: rel.relationship,
-          description: rel.description || undefined,
-          direction: 'to',
-        })
-      }
-    })
-
-    return relations
-  }
-
-  const getGraphData = useCallback(() => {
-    const nodes: GraphNode[] = filteredCharacters.map((char, i) => {
-      const angle = (2 * Math.PI * i) / filteredCharacters.length
-      const radius = 200
-      return {
-        id: char.id,
-        name: char.name,
-        role: char.role || '',
-        x: 400 + radius * Math.cos(angle),
-        y: 300 + radius * Math.sin(angle),
-      }
-    })
-
-    const links: GraphLink[] = []
-    filteredCharacters.forEach(char => {
-      char.relationshipsFrom?.forEach(rel => {
-        if (filteredCharacters.find(c => c.id === rel.toId)) {
-          links.push({
-            source: char.id,
-            target: rel.toId,
-            relationship: rel.relationship,
-          })
-        }
-      })
-    })
-
-    return { nodes, links }
-  }, [filteredCharacters])
-
-  const { nodes: graphNodes, links: graphLinks } = getGraphData()
+  const filteredCharacters = characters.filter(
+    (c) =>
+      c.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
+      c.personality?.toLowerCase().includes(searchQuery.toLowerCase())
+  );
 
   if (isLoading) {
     return (
-      <div className="p-8 flex items-center justify-center">
-        <div className="text-gray-500">加载中...</div>
+      <div className="flex items-center justify-center h-full">
+        <Loader2 className="w-8 h-8 animate-spin text-[var(--accent-color)]" />
       </div>
-    )
+    );
   }
 
   return (
-    <div className="min-h-screen bg-gray-50 p-6">
-      <div className="max-w-7xl mx-auto">
-        <div className="flex justify-between items-center mb-6">
-          <div>
-            <h1 className="text-2xl font-bold text-gray-900">人物档案</h1>
-            <p className="text-gray-600 mt-1">管理故事中的所有角色及其关系</p>
-          </div>
-          <div className="flex gap-3">
-            <Button variant="outline" onClick={() => setShowAiModal(true)}>
-              <Sparkles className="w-4 h-4 mr-2" />
-              AI 生成
-            </Button>
-            <Button onClick={handleCreate}>
-              <Plus className="w-4 h-4 mr-2" />
-              添加人物
-            </Button>
-          </div>
+    <div className="h-full flex flex-col bg-[var(--bg-primary)]">
+      {/* Header */}
+      <div className="flex items-center justify-between p-4 border-b border-[var(--border-color)]">
+        <div className="flex items-center gap-3">
+          <Users className="w-6 h-6 text-[var(--accent-color)]" />
+          <h1 className="text-2xl font-bold text-[var(--text-primary)]">人物管理</h1>
+          <span className="text-sm text-[var(--text-muted)] mt-1">({characters.length} 个角色)</span>
         </div>
-
-        <div className="flex gap-4 mb-6">
-          <div className="flex-1">
-            <Input
+        <div className="flex items-center gap-3">
+          <div className="relative">
+            <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 w-4 h-4 text-[var(--text-muted)]" />
+            <input
+              type="text"
+              placeholder="搜索角色..."
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
-              placeholder="搜索人物..."
-              className="w-full"
+              className="pl-10 pr-4 py-2 bg-[var(--bg-tertiary)] border border-[var(--border-color)] rounded-lg text-[var(--text-primary)] placeholder-[var(--text-muted)] focus:outline-none focus:border-[var(--accent-color)]"
             />
           </div>
-          <Select
-            value={filterRole}
-            onChange={(e) => setFilterRole(e.target.value)}
-            className="w-48"
-          >
-            <option value="">全部角色</option>
-            {ROLE_OPTIONS.map(opt => (
-              <option key={opt.value} value={opt.value}>{opt.label}</option>
-            ))}
-          </Select>
-          <div className="flex border rounded-lg overflow-hidden">
-            <button
-              onClick={() => setActiveTab('list')}
-              className={`px-4 py-2 text-sm font-medium transition-colors ${
-                activeTab === 'list' ? 'bg-blue-500 text-white' : 'bg-white text-gray-700'
-              }`}
-            >
-              列表
-            </button>
-            <button
-              onClick={() => setActiveTab('graph')}
-              className={`px-4 py-2 text-sm font-medium transition-colors ${
-                activeTab === 'graph' ? 'bg-blue-500 text-white' : 'bg-white text-gray-700'
-              }`}
-            >
-              关系图谱
-            </button>
-          </div>
+          <Button onClick={() => setShowCreateModal(true)}>
+            <Plus className="w-4 h-4 mr-2" />
+            新建角色
+          </Button>
         </div>
+      </div>
 
-        {activeTab === 'list' ? (
+      {/* Character List */}
+      <div className="flex-1 overflow-y-auto p-4">
+        {filteredCharacters.length === 0 ? (
+          <div className="flex flex-col items-center justify-center h-full text-gray-400">
+            <UserCircle className="w-16 h-16 mb-4 opacity-50" />
+            <p className="text-lg mb-2">暂无角色</p>
+            <p className="text-sm">点击"新建角色"开始创建</p>
+          </div>
+        ) : (
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-            {filteredCharacters.map(character => (
-              <Card key={character.id} className="hover:shadow-md transition-shadow">
-                <div className="p-4">
-                  <div className="flex justify-between items-start mb-3">
+            {filteredCharacters.map((character) => (
+              <Card
+                key={character.id}
+                className="group p-4 hover:border-[var(--accent-color)]/40 hover:shadow-lg transition-all duration-200 cursor-pointer bg-[var(--bg-secondary)] border-[var(--border-color)]"
+                onClick={() => openEditModal(character)}
+              >
+                <div className="flex items-start justify-between mb-3">
+                  <div className="flex items-center gap-3">
+                    <div className="w-10 h-10 rounded-full bg-[var(--accent-color)]/20 flex items-center justify-center">
+                      <UserCircle className="w-6 h-6 text-[var(--accent-color)]" />
+                    </div>
                     <div>
-                      <h3 className="font-semibold text-lg text-gray-900">{character.name}</h3>
+                      <h3 className="font-medium text-[var(--text-primary)]">{character.name}</h3>
                       {character.role && (
-                        <span className="text-xs bg-blue-100 text-blue-700 px-2 py-0.5 rounded mt-1 inline-block">
-                          {getRoleLabel(character.role)}
+                        <span
+                          className={`text-xs px-2 py-0.5 rounded-full ${
+                            ROLE_CONFIG[character.role]?.color || 'bg-gray-500/20 text-gray-400'
+                          }`}
+                        >
+                          {ROLE_CONFIG[character.role]?.label || character.role}
                         </span>
                       )}
                     </div>
-                    <div className="flex gap-1">
-                      <button
-                        onClick={() => handleEdit(character)}
-                        className="p-1 text-gray-400 hover:text-blue-600"
-                      >
-                        <Edit2 className="w-4 h-4" />
-                      </button>
-                      <button
-                        onClick={() => handleDelete(character)}
-                        className="p-1 text-gray-400 hover:text-red-600"
-                      >
-                        <Trash2 className="w-4 h-4" />
-                      </button>
-                    </div>
                   </div>
-
-                  {character.appearance && (
-                    <p className="text-sm text-gray-600 mb-2 line-clamp-2">
-                      {character.appearance}
-                    </p>
-                  )}
-
-                  {character.personality && (
-                    <p className="text-sm text-gray-500 mb-3 line-clamp-2">
-                      <span className="font-medium">性格：</span>{character.personality}
-                    </p>
-                  )}
-
-                  <div className="border-t pt-3 mt-3">
-                    <div className="flex justify-between items-center mb-2">
-                      <span className="text-sm font-medium text-gray-700">关系</span>
-                      <button
-                        onClick={() => {
-                          setSelectedCharacter(character)
-                          setShowRelationModal(true)
-                        }}
-                        className="text-xs text-blue-600 hover:text-blue-700"
-                      >
-                        + 添加
-                      </button>
-                    </div>
-                    {getRelationships(character).length > 0 ? (
-                      <div className="flex flex-wrap gap-1">
-                        {getRelationships(character).slice(0, 3).map((rel, i) => (
-                          <span key={i} className="text-xs bg-gray-100 text-gray-600 px-2 py-0.5 rounded">
-                            {rel.character.name}（{rel.relationship}）
-                          </span>
-                        ))}
-                        {getRelationships(character).length > 3 && (
-                          <span className="text-xs text-gray-400">
-                            +{getRelationships(character).length - 3} 更多
-                          </span>
-                        )}
-                      </div>
-                    ) : (
-                      <span className="text-xs text-gray-400">暂无关系</span>
-                    )}
+                  <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        openEditModal(character);
+                      }}
+                      className="p-1.5 rounded hover:bg-[var(--bg-hover)] text-[var(--text-muted)] hover:text-[var(--accent-color)] transition-all"
+                      title="编辑"
+                    >
+                      <Edit2 className="w-3.5 h-3.5" />
+                    </button>
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        handleOpenDeleteModal(character);
+                      }}
+                      className="p-1.5 rounded hover:bg-red-500/10 text-[var(--text-muted)] hover:text-red-400 transition-all"
+                      title="删除"
+                    >
+                      <Trash2 className="w-3.5 h-3.5" />
+                    </button>
                   </div>
                 </div>
+
+                {character.personality && (
+                  <p className="text-sm text-[var(--text-muted)] line-clamp-2 mb-2">
+                    {character.personality}
+                  </p>
+                )}
+
+                {character.appearance && (
+                  <p className="text-xs text-gray-500 line-clamp-1">
+                    外貌: {character.appearance}
+                  </p>
+                )}
               </Card>
             ))}
-
-            {filteredCharacters.length === 0 && (
-              <div className="col-span-full text-center py-12">
-                <Users className="w-12 h-12 mx-auto text-gray-400 mb-4" />
-                <h3 className="text-lg font-medium text-gray-900 mb-2">还没有人物</h3>
-                <p className="text-gray-500 mb-4">开始创建你的第一个角色吧</p>
-                <Button onClick={handleCreate}>创建人物</Button>
-              </div>
-            )}
           </div>
-        ) : (
-          <Card className="overflow-hidden">
-            <div className="p-4 border-b flex justify-between items-center bg-white">
-              <span className="text-sm text-gray-500">按住节点拖动可调整位置</span>
-              <div className="flex gap-2">
-                <Button variant="outline" size="sm" onClick={() => setGraphScale(s => Math.max(0.5, s - 0.1))}>
-                  <ZoomOut className="w-4 h-4" />
-                </Button>
-                <span className="text-sm text-gray-500 px-2 py-1">{Math.round(graphScale * 100)}%</span>
-                <Button variant="outline" size="sm" onClick={() => setGraphScale(s => Math.min(2, s + 0.1))}>
-                  <ZoomIn className="w-4 h-4" />
-                </Button>
-              </div>
-            </div>
-            <svg
-              ref={svgRef}
-              className="w-full h-[600px] bg-gray-50"
-              viewBox="0 0 800 600"
-              style={{ transform: `scale(${graphScale})`, transformOrigin: 'center' }}
-            >
-              <defs>
-                <marker
-                  id="arrowhead"
-                  markerWidth="10"
-                  markerHeight="7"
-                  refX="9"
-                  refY="3.5"
-                  orient="auto"
-                >
-                  <polygon points="0 0, 10 3.5, 0 7" fill="#6b7280" />
-                </marker>
-              </defs>
-
-              {graphLinks.map((link, i) => {
-                const source = graphNodes.find(n => n.id === link.source)
-                const target = graphNodes.find(n => n.id === link.target)
-                if (!source || !target) return null
-
-                const midX = (source.x + target.x) / 2
-                const midY = (source.y + target.y) / 2
-
-                return (
-                  <g key={i}>
-                    <line
-                      x1={source.x}
-                      y1={source.y}
-                      x2={target.x}
-                      y2={target.y}
-                      stroke="#9ca3af"
-                      strokeWidth={2}
-                      markerEnd="url(#arrowhead)"
-                    />
-                    <text
-                      x={midX}
-                      y={midY - 10}
-                      textAnchor="middle"
-                      className="text-xs fill-gray-600"
-                      style={{ fontSize: '10px' }}
-                    >
-                      {link.relationship}
-                    </text>
-                  </g>
-                )
-              })}
-
-              {graphNodes.map(node => (
-                <g
-                  key={node.id}
-                  transform={`translate(${node.x}, ${node.y})`}
-                  className="cursor-pointer"
-                  onClick={() => {
-                    const char = characters.find(c => c.id === node.id)
-                    if (char) handleEdit(char)
-                  }}
-                >
-                  <circle
-                    r="30"
-                    fill={node.role === 'protagonist' ? '#3b82f6' :
-                          node.role === 'antagonist' ? '#ef4444' :
-                          node.role === 'mentor' ? '#8b5cf6' : '#6b7280'}
-                    stroke="#fff"
-                    strokeWidth={2}
-                  />
-                  <text
-                    textAnchor="middle"
-                    dy="4"
-                    fill="#fff"
-                    style={{ fontSize: '12px', fontWeight: 'bold' }}
-                  >
-                    {node.name.slice(0, 2)}
-                  </text>
-                  <text
-                    y="45"
-                    textAnchor="middle"
-                    className="fill-gray-700"
-                    style={{ fontSize: '11px' }}
-                  >
-                    {node.name}
-                  </text>
-                </g>
-              ))}
-            </svg>
-          </Card>
         )}
       </div>
 
+      {/* Create/Edit Modal */}
       <Modal
-        isOpen={isModalOpen}
-        onClose={() => setIsModalOpen(false)}
-        title={modalMode === 'create' ? '创建人物' : '编辑人物'}
+        isOpen={showCreateModal || editingCharacter !== null}
+        onClose={() => {
+          setShowCreateModal(false);
+          setEditingCharacter(null);
+          resetForm();
+        }}
+        title={editingCharacter ? '编辑角色' : '新建角色'}
       >
         <div className="space-y-4 max-h-[70vh] overflow-y-auto pr-2">
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">姓名 *</label>
-            <Input
-              value={formData.name}
-              onChange={(e) => setFormData({ ...formData, name: e.target.value })}
-              placeholder="角色姓名"
-            />
+          <div className="grid grid-cols-2 gap-4">
+            <div>
+              <label className="block text-sm font-medium text-[var(--text-secondary)] mb-1">
+                角色名称 *
+              </label>
+              <Input
+                value={formData.name}
+                onChange={(e) => setFormData({ ...formData, name: e.target.value })}
+                placeholder="输入角色名称"
+              />
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-[var(--text-secondary)] mb-1">
+                角色定位
+              </label>
+              <select
+                value={formData.role}
+                onChange={(e) => setFormData({ ...formData, role: e.target.value })}
+                className="w-full px-3 py-2 bg-[var(--bg-tertiary)] border border-[var(--border-color)] rounded-lg text-[var(--text-primary)] focus:outline-none focus:border-[var(--accent-color)]"
+              >
+                <option value="protagonist">主角</option>
+                <option value="antagonist">反派</option>
+                <option value="supporting">配角</option>
+                <option value="minor">龙套</option>
+              </select>
+            </div>
           </div>
 
           <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">角色定位</label>
-            <Select
-              value={formData.role}
-              onChange={(e) => setFormData({ ...formData, role: e.target.value })}
-              className="w-full"
-            >
-              <option value="">选择角色定位</option>
-              {ROLE_OPTIONS.map(opt => (
-                <option key={opt.value} value={opt.value}>{opt.label}</option>
-              ))}
-            </Select>
-          </div>
-
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">外貌特征</label>
+            <label className="block text-sm font-medium text-[var(--text-secondary)] mb-1">
+              外貌描写
+            </label>
             <Textarea
               value={formData.appearance}
               onChange={(e) => setFormData({ ...formData, appearance: e.target.value })}
@@ -628,7 +305,9 @@ export function CharacterManagement() {
           </div>
 
           <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">性格特点</label>
+            <label className="block text-sm font-medium text-[var(--text-secondary)] mb-1">
+              性格特点
+            </label>
             <Textarea
               value={formData.personality}
               onChange={(e) => setFormData({ ...formData, personality: e.target.value })}
@@ -638,203 +317,106 @@ export function CharacterManagement() {
           </div>
 
           <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">背景故事</label>
+            <label className="block text-sm font-medium text-[var(--text-secondary)] mb-1">
+              背景故事
+            </label>
             <Textarea
               value={formData.background}
               onChange={(e) => setFormData({ ...formData, background: e.target.value })}
-              placeholder="角色的过去和背景..."
+              placeholder="描述角色的背景..."
               rows={3}
             />
           </div>
 
           <div className="grid grid-cols-2 gap-4">
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">目标</label>
-              <Input
+              <label className="block text-sm font-medium text-[var(--text-secondary)] mb-1">
+                目标动机
+              </label>
+              <Textarea
                 value={formData.goals}
                 onChange={(e) => setFormData({ ...formData, goals: e.target.value })}
-                placeholder="角色的主要目标"
+                placeholder="角色的目标..."
+                rows={2}
               />
             </div>
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">缺陷/弱点</label>
-              <Input
+              <label className="block text-sm font-medium text-gray-300 mb-1">
+                缺陷弱点
+              </label>
+              <Textarea
                 value={formData.flaws}
                 onChange={(e) => setFormData({ ...formData, flaws: e.target.value })}
-                placeholder="角色的缺陷或弱点"
+                placeholder="角色的缺陷..."
+                rows={2}
               />
             </div>
           </div>
 
           <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">人物弧光</label>
+            <label className="block text-sm font-medium text-[var(--text-secondary)] mb-1">
+              角色弧光
+            </label>
             <Textarea
               value={formData.arc}
               onChange={(e) => setFormData({ ...formData, arc: e.target.value })}
-              placeholder="角色在故事中的成长变化..."
+              placeholder="描述角色的成长变化..."
               rows={2}
             />
           </div>
 
           <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">语言风格</label>
-            <Input
+            <label className="block text-sm font-medium text-[var(--text-secondary)] mb-1">
+              说话风格
+            </label>
+            <Textarea
               value={formData.voice}
               onChange={(e) => setFormData({ ...formData, voice: e.target.value })}
-              placeholder="角色的说话风格、口头禅等"
+              placeholder="描述角色的说话方式..."
+              rows={2}
             />
           </div>
 
           <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">备注</label>
+            <label className="block text-sm font-medium text-[var(--text-secondary)] mb-1">
+              备注
+            </label>
             <Textarea
               value={formData.notes}
               onChange={(e) => setFormData({ ...formData, notes: e.target.value })}
-              placeholder="其他备注信息..."
+              placeholder="其他备注..."
               rows={2}
             />
           </div>
-        </div>
 
-        <div className="flex justify-end gap-3 pt-4 border-t mt-4">
-          <Button variant="outline" onClick={() => setIsModalOpen(false)}>取消</Button>
-          <Button onClick={handleSubmit} disabled={!formData.name.trim()}>
-            {modalMode === 'create' ? '创建' : '保存'}
-          </Button>
-        </div>
-      </Modal>
-
-      <Modal
-        isOpen={showRelationModal}
-        onClose={() => setShowRelationModal(false)}
-        title="添加人物关系"
-      >
-        <div className="space-y-4">
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">
-              选择人物（与「{selectedCharacter?.name}」的关系）
-            </label>
-            <Select
-              value={relationTarget}
-              onChange={(e) => setRelationTarget(e.target.value)}
-              className="w-full"
+          <div className="flex justify-end gap-3 pt-4 border-t border-[var(--border-color)]">
+            <Button
+              variant="secondary"
+              onClick={() => {
+                setShowCreateModal(false);
+                setEditingCharacter(null);
+                resetForm();
+              }}
             >
-              <option value="">选择人物...</option>
-              {characters
-                .filter(c => c.id !== selectedCharacter?.id)
-                .map(c => (
-                  <option key={c.id} value={c.id}>{c.name}</option>
-                ))}
-            </Select>
-          </div>
-
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">关系类型</label>
-            <Select
-              value={relationType}
-              onChange={(e) => setRelationType(e.target.value)}
-              className="w-full"
+              取消
+            </Button>
+            <Button
+              onClick={editingCharacter ? handleUpdate : handleCreate}
+              disabled={!formData.name.trim()}
             >
-              <option value="">选择关系...</option>
-              {RELATIONSHIP_TYPES.map(type => (
-                <option key={type} value={type}>{type}</option>
-              ))}
-            </Select>
+              {editingCharacter ? '保存' : '创建'}
+            </Button>
           </div>
-
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">关系描述</label>
-            <Textarea
-              value={relationDescription}
-              onChange={(e) => setRelationDescription(e.target.value)}
-              placeholder="描述这段关系的具体情况..."
-              rows={2}
-            />
-          </div>
-        </div>
-
-        <div className="flex justify-end gap-3 pt-4 border-t mt-4">
-          <Button variant="outline" onClick={() => setShowRelationModal(false)}>取消</Button>
-          <Button onClick={handleCreateRelation} disabled={!relationTarget || !relationType}>
-            添加关系
-          </Button>
         </div>
       </Modal>
 
-      <Modal
-        isOpen={showAiModal}
-        onClose={() => {
-          setShowAiModal(false)
-          setAiPrompt('')
-          setAiGeneratedCharacter(null)
-          setAiStreamedText('')
-          reset()
-        }}
-        title="AI 生成人物"
-      >
-        <div className="space-y-4">
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">
-              描述你想要的人物
-            </label>
-            <Textarea
-              value={aiPrompt}
-              onChange={(e) => setAiPrompt(e.target.value)}
-              placeholder="例如：一个年轻的武侠小说主角，性格内向但内心坚定，身世成谜..."
-              rows={4}
-            />
-          </div>
-
-          <Button onClick={handleAiGenerate} disabled={isStreaming || !aiPrompt.trim()}>
-            <Sparkles className="w-4 h-4 mr-2" />
-            {isStreaming ? '生成中...' : '生成人物设定'}
-          </Button>
-
-          {isStreaming && (
-            <div className="border rounded-lg p-4 bg-yellow-50 space-y-2">
-              <div className="animate-pulse">
-                <h4 className="font-medium text-yellow-900">正在生成...</h4>
-                <p className="text-sm text-yellow-700 mt-2 whitespace-pre-wrap break-words">
-                  {aiStreamedText}
-                </p>
-              </div>
-            </div>
-          )}
-
-          {streamError && (
-            <div className="border rounded-lg p-3 bg-red-50 text-sm text-red-700">
-              {streamError.message}
-            </div>
-          )}
-
-          {!isStreaming && aiGeneratedCharacter && (
-            <div className="border rounded-lg p-4 bg-gray-50 space-y-2">
-              <h4 className="font-medium text-gray-900">{aiGeneratedCharacter.name}</h4>
-              <p className="text-sm text-gray-600">
-                <span className="font-medium">角色：</span>{getRoleLabel(aiGeneratedCharacter.role)}
-              </p>
-              {aiGeneratedCharacter.appearance && (
-                <p className="text-sm text-gray-600">
-                  <span className="font-medium">外貌：</span>{aiGeneratedCharacter.appearance}
-                </p>
-              )}
-              {aiGeneratedCharacter.personality && (
-                <p className="text-sm text-gray-600">
-                  <span className="font-medium">性格：</span>{aiGeneratedCharacter.personality}
-                </p>
-              )}
-              {aiGeneratedCharacter.background && (
-                <p className="text-sm text-gray-600">
-                  <span className="font-medium">背景：</span>{aiGeneratedCharacter.background}
-                </p>
-              )}
-              <Button onClick={handleApplyAiCharacter} className="w-full mt-2">
-                使用此设定创建人物
-              </Button>
-            </div>
-          )}
-        </div>
-      </Modal>
+      <DeleteConfirmModal
+        isOpen={deleteModal.isOpen}
+        onClose={() => setDeleteModal({ isOpen: false, character: null })}
+        onConfirm={handleDelete}
+        title={`确定要删除角色「${deleteModal.character?.name || ''}」吗？`}
+        message="删除后将无法恢复，请谨慎操作"
+      />
     </div>
-  )
-}
+  );
+};

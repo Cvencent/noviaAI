@@ -174,15 +174,15 @@ export function EnhancedWritingToolbar({ selectedText, onInsertText }: EnhancedW
           <span>增强写作</span>
         </div>
         {tools.map((tool) => (
-          <Button
-            key={tool.id}
-            variant="ghost"
-            size="sm"
-            onClick={() => handleToolClick(tool.id)}
-            disabled={isLoading}
-            className={activeTool === tool.id ? 'bg-blue-100 text-blue-700' : ''}
-            title={tool.description}
-          >
+        <Button
+          key={tool.id}
+          variant="ghost"
+          size="sm"
+          onClick={() => handleToolClick(tool.id)}
+          disabled={isLoading}
+          className={activeTool === tool.id ? 'bg-[var(--accent-color)] text-white' : 'bg-[var(--bg-secondary)] text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]'}
+          title={tool.description}
+        >
             {tool.icon}
             <span className="ml-1 hidden sm:inline">{tool.label}</span>
           </Button>

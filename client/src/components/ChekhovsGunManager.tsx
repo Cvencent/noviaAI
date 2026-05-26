@@ -42,7 +42,7 @@ export function ChekhovsGunManager({ projectId }: ChekhovsGunManagerProps) {
   const [isCreateModalOpen, setIsCreateModalOpen] = useState(false)
   const [editingGun, setEditingGun] = useState<ChekhovsGun | null>(null)
   const [isLoading, setIsLoading] = useState(false)
-  const { success, error } = useToast()
+  const { showToast } = useToast()
 
   useEffect(() => {
     loadGuns()
@@ -77,7 +77,7 @@ export function ChekhovsGunManager({ projectId }: ChekhovsGunManagerProps) {
       }))
       setGuns(convertedGuns)
     } catch (err) {
-      error('加载伏笔失败')
+      showToast({ type: 'error', message: '加载伏笔失败' })
       console.error('Failed to load Chekhovs guns:', err)
     } finally {
       setIsLoading(false)
@@ -89,9 +89,9 @@ export function ChekhovsGunManager({ projectId }: ChekhovsGunManagerProps) {
     try {
       await chekhovsGunsApi.delete(projectId, gunId)
       setGuns(guns.filter(g => g.id !== gunId))
-      success('伏笔已删除')
+      showToast({ type: 'success', message: '伏笔已删除' })
     } catch (err) {
-      error('删除伏笔失败')
+      showToast({ type: 'error', message: '删除伏笔失败' })
       console.error('Failed to delete Chekhovs gun:', err)
     }
   }
@@ -110,7 +110,7 @@ export function ChekhovsGunManager({ projectId }: ChekhovsGunManagerProps) {
           importance: updated.importance as any,
           tags: updated.tags ? updated.tags.split(',').map(t => t.trim()).filter(Boolean) : undefined,
         } as ChekhovsGun : g))
-        success('伏笔已更新')
+        showToast({ type: 'success', message: '伏笔已更新' })
       } else {
         const created = await chekhovsGunsApi.create(projectId, apiData)
         const converted: ChekhovsGun = {
@@ -120,12 +120,12 @@ export function ChekhovsGunManager({ projectId }: ChekhovsGunManagerProps) {
           tags: created.tags ? created.tags.split(',').map(t => t.trim()).filter(Boolean) : undefined,
         }
         setGuns([converted, ...guns])
-        success('伏笔已埋设')
+        showToast({ type: 'success', message: '伏笔已埋设' })
       }
       setIsCreateModalOpen(false)
       setEditingGun(null)
     } catch (err) {
-      error('保存伏笔失败')
+      showToast({ type: 'error', message: '保存伏笔失败' })
       console.error('Failed to save Chekhovs gun:', err)
     }
   }
@@ -140,7 +140,6 @@ export function ChekhovsGunManager({ projectId }: ChekhovsGunManagerProps) {
 
   return (
     <div className="h-full flex flex-col">
-      {/* 头部工具栏 */}
       <div className="p-4 border-b border-gray-200">
         <div className="flex items-center justify-between mb-4">
           <h2 className="text-xl font-bold flex items-center gap-2">
@@ -156,7 +155,6 @@ export function ChekhovsGunManager({ projectId }: ChekhovsGunManagerProps) {
           </Button>
         </div>
 
-        {/* 统计卡片 */}
         <div className="grid grid-cols-5 gap-3 mb-4">
           <Card className="p-3 text-center">
             <div className="text-2xl font-bold text-gray-700">{stats.total}</div>
@@ -180,7 +178,6 @@ export function ChekhovsGunManager({ projectId }: ChekhovsGunManagerProps) {
           </Card>
         </div>
 
-        {/* 搜索和筛选 */}
         <div className="flex gap-3">
           <div className="flex-1 relative">
             <Input
@@ -216,7 +213,6 @@ export function ChekhovsGunManager({ projectId }: ChekhovsGunManagerProps) {
         </div>
       </div>
 
-      {/* 伏笔列表 */}
       <div className="flex-1 overflow-auto p-4">
         {isLoading ? (
           <div className="flex items-center justify-center py-8">
@@ -301,7 +297,6 @@ export function ChekhovsGunManager({ projectId }: ChekhovsGunManagerProps) {
         )}
       </div>
 
-      {/* 创建/编辑弹窗 */}
       <ChekhovsGunModal
         isOpen={isCreateModalOpen}
         onClose={() => {

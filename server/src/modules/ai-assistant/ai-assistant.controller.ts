@@ -1,6 +1,6 @@
 import { Controller, Post, Body, Res, UseGuards } from '@nestjs/common'
 import { Response } from 'express'
-import { IsString, IsNotEmpty, IsOptional } from 'class-validator'
+import { IsString, IsNotEmpty, IsOptional, IsArray } from 'class-validator'
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard'
 import { CurrentUser } from '../auth/decorators/current-user.decorator'
 import { AiAssistantService } from './ai-assistant.service'
@@ -29,6 +29,10 @@ export class ProcessMessageDto {
   @IsString()
   @IsOptional()
   chapterTitle?: string
+
+  @IsArray()
+  @IsOptional()
+  conversationHistory?: Array<{ role: 'user' | 'assistant'; content: string }>
 }
 
 @Controller('ai-assistant')
@@ -49,6 +53,7 @@ export class AiAssistantController {
       dto.chapterId,
       dto.chapterContent,
       dto.chapterTitle,
+      dto.conversationHistory,
     )
   }
 
@@ -72,6 +77,7 @@ export class AiAssistantController {
         dto.chapterId,
         dto.chapterContent,
         dto.chapterTitle,
+        dto.conversationHistory,
       )) {
         res.write(`data: ${JSON.stringify(chunk)}\n\n`)
       }

@@ -1,13 +1,14 @@
 import React, { useState, useEffect } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { Save, RotateCcw, Sparkles, Plus, Trash2, Key, MessageSquare, ArrowLeft } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
-import { Save, RotateCcw, Sparkles, Plus, Trash2, Key, ArrowLeft, MessageSquare } from 'lucide-react';
 import { Button } from '@/components/ui/Button';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/Card';
 import { Select } from '@/components/ui/Select';
 import { Input } from '@/components/ui/Input';
 import { Modal } from '@/components/ui/Modal';
 import { LoadingSpinner } from '@/components/ui/LoadingSpinner';
+import { DeleteConfirmModal } from '@/components/DeleteConfirmModal';
 import { aiConfigApi } from '@/api/ai-config';
 import { apiKeysApi } from '@/api/api-keys';
 import { useToast } from '@/contexts/ToastContext';
@@ -144,10 +145,18 @@ export const AISettingsPage = () => {
     createKeyMutation.mutate(newKey);
   };
 
+  const [deleteModal, setDeleteModal] = useState({
+    isOpen: false,
+    keyId: ''
+  });
+
   const handleDeleteKey = (id: string) => {
-    if (confirm('确定要删除这个API密钥吗？')) {
-      deleteKeyMutation.mutate(id);
-    }
+    setDeleteModal({ isOpen: true, keyId: id });
+  };
+
+  const confirmDeleteKey = () => {
+    deleteKeyMutation.mutate(deleteModal.keyId);
+    setDeleteModal({ isOpen: false, keyId: '' });
   };
 
   const handleSaveModificationConfig = () => {
@@ -163,38 +172,38 @@ export const AISettingsPage = () => {
 
   if (configsLoading || keysLoading) {
     return (
-      <div className="p-8 flex items-center justify-center h-64">
+      <div className="h-full bg-[var(--bg-primary)] p-4 flex items-center justify-center">
         <LoadingSpinner />
       </div>
     );
   }
 
   return (
-    <div className="p-8 max-w-6xl mx-auto">
-      <div className="mb-8">
+    <div className="h-full bg-[var(--bg-primary)] p-6 overflow-y-auto">
+      <div className="mb-6">
         <div className="flex items-center justify-between">
-          <div>
-            <div className="flex items-center gap-3 mb-4">
-              <Button variant="ghost" onClick={() => navigate(-1)}>
-                <ArrowLeft className="w-4 h-4 mr-1" />
-                返回
-              </Button>
+          <div className="flex items-center gap-3">
+            <Button variant="ghost" size="sm" onClick={() => navigate(-1)} className="h-8">
+              <ArrowLeft className="w-4 h-4 mr-1" />
+              返回
+            </Button>
+            <div>
+              <h1 className="text-2xl font-bold text-[var(--text-primary)] flex items-center gap-2">
+                <Sparkles className="w-5 h-5 text-[var(--accent-color)]" />
+                AI 模块配置
+              </h1>
+              <p className="text-sm text-[var(--text-muted)] mt-1">
+                为不同的AI功能配置独立的服务商、模型和API密钥
+              </p>
             </div>
-            <h1 className="text-3xl font-bold text-gray-900 flex items-center gap-3">
-              <Sparkles className="w-8 h-8 text-indigo-600" />
-              AI 模块配置
-            </h1>
-            <p className="text-gray-500 mt-2">
-              为不同的AI功能配置独立的服务商、模型和API密钥
-            </p>
           </div>
-          <div className="flex gap-3">
-            <Button variant="outline" onClick={handleReset}>
-              <RotateCcw className="w-4 h-4 mr-2" />
+          <div className="flex gap-2">
+            <Button variant="outline" size="sm" onClick={handleReset}>
+              <RotateCcw className="w-3.5 h-3.5 mr-1" />
               恢复默认
             </Button>
-            <Button onClick={handleSave} disabled={!hasChanges}>
-              <Save className="w-4 h-4 mr-2" />
+            <Button size="sm" onClick={handleSave} disabled={!hasChanges}>
+              <Save className="w-3.5 h-3.5 mr-1" />
               保存配置
             </Button>
           </div>
@@ -213,15 +222,15 @@ export const AISettingsPage = () => {
             const availableKeys = getKeysForProvider(config.provider);
 
             return (
-              <Card key={action} className="overflow-hidden">
-                <CardHeader className="bg-gradient-to-r from-indigo-50 to-amber-50">
+              <Card key={action} className="overflow-hidden bg-[var(--bg-secondary)] border-[var(--border-color)]">
+                <CardHeader className="bg-gradient-to-r from-[var(--accent-color)]/10 to-amber-900/10">
                   <div className="flex items-start justify-between">
                     <div className="flex-1">
-                      <CardTitle className="text-lg flex items-center gap-2">
-                        <span className="w-2 h-2 bg-indigo-500 rounded-full"></span>
+                      <CardTitle className="text-lg flex items-center gap-2 text-[var(--text-primary)]">
+                        <span className="w-2 h-2 bg-[var(--accent-color)] rounded-full"></span>
                         {AIActionLabels[action]}
                       </CardTitle>
-                      <CardDescription className="mt-2">
+                      <CardDescription className="mt-2 text-[var(--text-muted)]">
                         {AIActionDescriptions[action]}
                       </CardDescription>
                     </div>
@@ -232,16 +241,16 @@ export const AISettingsPage = () => {
                         onChange={(e) =>
                           handleConfigChange(action, 'isActive', e.target.checked)
                         }
-                        className="w-5 h-5 rounded border-gray-300 text-indigo-600 focus:ring-indigo-500"
+                        className="w-5 h-5 rounded border-[var(--border-color)] text-[var(--accent-color)] focus:ring-[var(--accent-color)]"
                       />
-                      <span className="text-sm font-medium text-gray-700">启用</span>
+                      <span className="text-sm font-medium text-[var(--text-secondary)]">启用</span>
                     </label>
                   </div>
                 </CardHeader>
                 <CardContent className="p-6">
                   <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
                     <div>
-                      <label className="block text-sm font-medium text-gray-700 mb-2">
+                      <label className="block text-sm font-medium text-[var(--text-secondary)] mb-2">
                         AI 服务商
                       </label>
                       <Select
@@ -265,7 +274,7 @@ export const AISettingsPage = () => {
                       </Select>
                     </div>
                     <div>
-                      <label className="block text-sm font-medium text-gray-700 mb-2">
+                      <label className="block text-sm font-medium text-[var(--text-secondary)] mb-2">
                         模型
                       </label>
                       <Select
@@ -274,6 +283,7 @@ export const AISettingsPage = () => {
                           handleConfigChange(action, 'model', e.target.value)
                         }
                         disabled={!config.isActive}
+                        className="bg-[var(--bg-primary)] border-[var(--border-color)] text-[var(--text-primary)]"
                       >
                         {(AIModelOptions[config.provider as AIProvider] || []).map(
                           (model) => (
@@ -311,11 +321,11 @@ export const AISettingsPage = () => {
         </div>
 
         <div className="lg:col-span-1">
-          <Card className="sticky top-24">
-            <CardHeader>
+          <Card className="sticky top-24 overflow-hidden bg-[var(--bg-secondary)] border-[var(--border-color)]">
+            <CardHeader className="bg-gradient-to-r from-[var(--accent-color)]/10 to-amber-900/10">
               <div className="flex items-center justify-between">
-                <CardTitle className="flex items-center gap-2">
-                  <Key className="w-5 h-5 text-indigo-600" />
+                <CardTitle className="flex items-center gap-2 text-[var(--text-primary)]">
+                  <Key className="w-5 h-5 text-[var(--accent-color)]" />
                   API 密钥管理
                 </CardTitle>
                 <Button size="sm" onClick={() => setIsKeyModalOpen(true)}>
@@ -323,9 +333,9 @@ export const AISettingsPage = () => {
                 </Button>
               </div>
             </CardHeader>
-            <CardContent className="space-y-3">
+            <CardContent className="p-6 space-y-3">
               {apiKeys.length === 0 ? (
-                <div className="text-center py-8 text-gray-500">
+                <div className="text-center py-8 text-[var(--text-muted)]">
                   <Key className="w-12 h-12 mx-auto mb-3 opacity-50" />
                   <p>暂无API密钥</p>
                   <p className="text-sm">点击上方按钮添加</p>
@@ -334,18 +344,18 @@ export const AISettingsPage = () => {
                 apiKeys.map((key) => (
                   <div
                     key={key.id}
-                    className="flex items-center justify-between p-3 bg-gray-50 rounded-lg"
+                    className="flex items-center justify-between p-3 bg-[var(--bg-primary)] rounded-lg border border-[var(--border-color)]"
                   >
                     <div>
-                      <p className="font-medium text-gray-900">{key.name}</p>
-                      <p className="text-xs text-gray-500">
+                      <p className="font-medium text-[var(--text-primary)]">{key.name}</p>
+                      <p className="text-xs text-[var(--text-muted)]">
                         {AIProviderLabels[key.provider as AIProvider]}
                         {key.baseUrl && (
-                          <span className="ml-2 text-indigo-500">自定义端点</span>
+                          <span className="ml-2 text-[var(--accent-color)]">自定义端点</span>
                         )}
                       </p>
                       {key.baseUrl && (
-                        <p className="text-xs text-gray-400 mt-1 truncate max-w-[200px]" title={key.baseUrl}>
+                        <p className="text-xs text-[var(--text-muted)] mt-1 truncate max-w-[200px]" title={key.baseUrl}>
                           {key.baseUrl}
                         </p>
                       )}
@@ -354,7 +364,7 @@ export const AISettingsPage = () => {
                       {key.isActive ? (
                         <span className="w-2 h-2 bg-green-500 rounded-full" />
                       ) : (
-                        <span className="w-2 h-2 bg-gray-300 rounded-full" />
+                        <span className="w-2 h-2 bg-[var(--text-muted)] rounded-full" />
                       )}
                       <button
                         onClick={() => handleDeleteKey(key.id)}
@@ -369,21 +379,21 @@ export const AISettingsPage = () => {
             </CardContent>
           </Card>
 
-          <Card className="mt-6">
-            <CardHeader>
-              <CardTitle className="flex items-center gap-2">
-                <MessageSquare className="w-5 h-5 text-indigo-600" />
+          <Card className="mt-6 overflow-hidden bg-[var(--bg-secondary)] border-[var(--border-color)]">
+            <CardHeader className="bg-gradient-to-r from-[var(--accent-color)]/10 to-amber-900/10">
+              <CardTitle className="flex items-center gap-2 text-[var(--text-primary)]">
+                <MessageSquare className="w-5 h-5 text-[var(--accent-color)]" />
                 AI 修改确认
               </CardTitle>
-              <CardDescription>
+              <CardDescription className="text-[var(--text-muted)]">
                 配置 AI 修改章节内容时的确认行为
               </CardDescription>
             </CardHeader>
-            <CardContent className="space-y-4">
+            <CardContent className="p-6 space-y-4 bg-[var(--bg-secondary)]">
               <div className="flex items-center justify-between">
                 <div>
-                  <label className="font-medium text-gray-900">需要确认修改</label>
-                  <p className="text-sm text-gray-500">AI 建议修改时，是否需要你确认才应用</p>
+                  <label className="font-medium text-[var(--text-primary)]">需要确认修改</label>
+                  <p className="text-sm text-[var(--text-muted)]">AI 建议修改时，是否需要你确认才应用</p>
                 </div>
                 <button
                   type="button"
@@ -466,9 +476,9 @@ export const AISettingsPage = () => {
       </div>
 
       {hasChanges && (
-        <div className="fixed bottom-8 right-8 bg-white rounded-xl shadow-2xl p-4 border border-indigo-200">
-          <div className="flex items-center gap-3">
-            <span className="text-sm font-medium text-gray-700">有未保存的更改</span>
+        <div className="mt-6 p-4 bg-[var(--bg-secondary)] rounded-lg border border-[var(--border-color)]">
+          <div className="flex items-center justify-between">
+            <span className="text-sm font-medium text-[var(--text-secondary)]">有未保存的更改</span>
             <Button size="sm" onClick={handleSave}>
               保存
             </Button>
@@ -528,6 +538,15 @@ export const AISettingsPage = () => {
           />
         </form>
       </Modal>
+
+      {/* Delete confirmation modal */}
+      <DeleteConfirmModal
+        isOpen={deleteModal.isOpen}
+        onClose={() => setDeleteModal({ isOpen: false, keyId: '' })}
+        onConfirm={confirmDeleteKey}
+        title="确定要删除这个API密钥吗？"
+        message="此操作无法撤销。"
+      />
     </div>
   );
 };

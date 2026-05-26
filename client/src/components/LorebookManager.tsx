@@ -5,6 +5,7 @@ import { Input } from './ui/Input'
 import { Select } from './ui/Select'
 import { Modal } from './ui/Modal'
 import { Card } from './ui/Card'
+import { DeleteConfirmModal } from './DeleteConfirmModal'
 import { lorebookApi, LoreEntry } from '../api/enhanced-writing'
 
 interface LorebookManagerProps {
@@ -28,6 +29,7 @@ export function LorebookManager({ projectId }: LorebookManagerProps) {
   const [isCreateModalOpen, setIsCreateModalOpen] = useState(false)
   const [editingEntry, setEditingEntry] = useState<LoreEntry | null>(null)
   const [isLoading, setIsLoading] = useState(false)
+  const [deleteModal, setDeleteModal] = useState<{ isOpen: boolean; entryId: string; entryName: string }>({ isOpen: false, entryId: '', entryName: '' })
 
   useEffect(() => {
     loadEntries()
@@ -60,13 +62,19 @@ export function LorebookManager({ projectId }: LorebookManagerProps) {
     }
   }
 
-  const handleDelete = async (entryId: string) => {
-    if (!confirm('确定要删除这个条目吗？')) return
+  const handleDelete = async (entryId: string, entryName: string) => {
+    setDeleteModal({ isOpen: true, entryId, entryName })
+  }
+
+  const handleConfirmDelete = async () => {
+    if (!deleteModal.entryId) return
     try {
-      await lorebookApi.deleteEntry(entryId)
-      setEntries(entries.filter(e => e.id !== entryId))
+      await lorebookApi.deleteEntry(deleteModal.entryId)
+      setEntries(entries.filter(e => e.id !== deleteModal.entryId))
     } catch (error) {
       console.error('删除失败:', error)
+    } finally {
+      setDeleteModal({ isOpen: false, entryId: '', entryName: '' })
     }
   }
 
@@ -91,7 +99,7 @@ export function LorebookManager({ projectId }: LorebookManagerProps) {
   }
 
   return (
-    <div className="h-full flex flex-col">
+    <div className="h-full bg-[var(--bg-primary)] flex flex-col">
       {/* 头部工具栏 */}
       <div className="p-4 border-b border-gray-200">
         <div className="flex items-center justify-between mb-4">
@@ -207,7 +215,7 @@ export function LorebookManager({ projectId }: LorebookManagerProps) {
                       <Button
                         variant="ghost"
                         size="sm"
-                        onClick={() => handleDelete(entry.id)}
+                        onClick={() => handleDelete(entry.id, entry.name)}
                       >
                         <Trash2 className="w-4 h-4 text-red-500" />
                       </Button>
@@ -229,6 +237,14 @@ export function LorebookManager({ projectId }: LorebookManagerProps) {
         }}
         onSave={handleSave}
         initialData={editingEntry}
+      />
+
+      <DeleteConfirmModal
+        isOpen={deleteModal.isOpen}
+        onClose={() => setDeleteModal({ isOpen: false, entryId: '', entryName: '' })}
+        onConfirm={handleConfirmDelete}
+        title={`确定要删除条目「${deleteModal.entryName}」吗？`}
+        message="删除后将无法恢复，请谨慎操作"
       />
     </div>
   )
@@ -378,13 +394,15 @@ function LoreEntryModal({ isOpen, onClose, onSave, initialData }: LoreEntryModal
 
         {/* 详细内容 */}
         <div>
-          <label className="text-sm font-medium block mb-1">详细内容</label>
+          <label className="block text-sm font-medium text-[var(--text-secondary)] mb-1">
+            详细内容
+          </label>
           <textarea
             value={formData.content}
             onChange={(e) => setFormData({ ...formData, content: e.target.value })}
+            rows={6}
+            className="w-full px-3 py-2 border border-[var(--border-color)] rounded-lg focus:ring-2 focus:ring-[var(--accent-color)] focus:border-[var(--accent-color)] bg-[var(--bg-secondary)] text-[var(--text-primary)]"
             placeholder="详细内容、设定说明..."
-            rows={4}
-            className="w-full px-3 py-2 border rounded-md"
           />
         </div>
 

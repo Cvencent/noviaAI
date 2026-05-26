@@ -18,6 +18,7 @@ import {
   Loader2
 } from 'lucide-react';
 import { Button } from '../components/ui/Button';
+import { DeleteConfirmModal } from '../components/DeleteConfirmModal';
 import { Card } from '../components/ui/Card';
 import { Input } from '../components/ui/Input';
 import { Textarea } from '../components/ui/Textarea';
@@ -103,6 +104,7 @@ export function WorldSettings() {
   const [modalMode, setModalMode] = useState<'create' | 'edit'>('create');
   const [isLoading, setIsLoading] = useState(true);
   const [isGenerating, setIsGenerating] = useState<string | null>(null);
+  const [deleteModal, setDeleteModal] = useState<{ isOpen: boolean; setting: WorldSetting | null }>({ isOpen: false, setting: null });
   const [formData, setFormData] = useState({
     category: '',
     name: '',
@@ -159,14 +161,20 @@ export function WorldSettings() {
   };
 
   const handleDelete = async (setting: WorldSetting) => {
-    if (!projectId || !confirm(`确定要删除「${setting.name}」吗？`)) return;
+    setDeleteModal({ isOpen: true, setting });
+  };
+
+  const handleConfirmDelete = async () => {
+    if (!projectId || !deleteModal.setting) return;
     try {
-      await worldSettingsApi.delete(projectId, setting.id);
+      await worldSettingsApi.delete(projectId, deleteModal.setting.id);
       await loadSettings();
       success('已删除设定');
     } catch (err) {
       error('删除失败');
       console.error('删除失败:', err);
+    } finally {
+      setDeleteModal({ isOpen: false, setting: null });
     }
   };
 
@@ -267,19 +275,19 @@ export function WorldSettings() {
 
   if (isLoading) {
     return (
-      <div className="min-h-screen bg-gray-50 flex items-center justify-center p-8">
-        <div className="text-gray-500">加载中...</div>
+      <div className="h-full bg-[var(--bg-primary)] flex items-center justify-center p-4 overflow-y-auto">
+        <div className="text-[var(--text-muted)]">加载中...</div>
       </div>
     );
   }
 
   return (
-    <div className="min-h-screen bg-gray-50 p-6">
+    <div className="h-full bg-[var(--bg-primary)] p-4 overflow-y-auto">
       <div className="max-w-6xl mx-auto">
         <div className="flex items-center justify-between mb-6">
           <div>
-            <h1 className="text-2xl font-bold text-gray-900">世界观设定</h1>
-            <p className="text-gray-600 mt-1">构建你的故事世界，包括地理、政治、文化、魔法体系等</p>
+            <h1 className="text-2xl font-bold text-[var(--text-primary)]">世界观设定</h1>
+            <p className="text-[var(--text-muted)] mt-1">构建你的故事世界，包括地理、政治、文化、魔法体系等</p>
           </div>
           <div className="flex gap-3">
             <Button
@@ -305,9 +313,9 @@ export function WorldSettings() {
           <div className="lg:col-span-2 space-y-4">
             {settings.length === 0 ? (
               <Card className="text-center py-12">
-                <FolderOpen className="w-12 h-12 mx-auto text-gray-400 mb-4" />
-                <h3 className="text-lg font-medium text-gray-900 mb-2">还没有世界观设定</h3>
-                <p className="text-gray-500 mb-4">开始构建你的故事世界吧</p>
+                <FolderOpen className="w-12 h-12 mx-auto text-[var(--text-muted)] mb-4" />
+                <h3 className="text-sm font-medium text-[var(--text-primary)] mb-2">还没有世界观设定</h3>
+                <p className="text-xs text-[var(--text-muted)] mb-4">开始构建你的故事世界吧</p>
                 <div className="flex justify-center gap-3">
                   <Button variant="outline" onClick={handleAiGenerateSettings}>
                     <Sparkles className="w-4 h-4 mr-2" />
@@ -329,36 +337,36 @@ export function WorldSettings() {
                     <Card key={preset.id} className="overflow-hidden">
                       <button
                         onClick={() => toggleCategory(preset.name)}
-                        className="w-full flex items-center justify-between p-4 hover:bg-gray-50 transition-colors text-left"
+                        className="w-full flex items-center justify-between p-4 hover:bg-[var(--bg-hover)] transition-colors text-left"
                       >
                         <div className="flex items-center gap-3">
                           <div className={`p-2 rounded-lg ${preset.color}`}>
                             <Icon className="w-5 h-5 text-white" />
                           </div>
                           <div>
-                            <h3 className="font-semibold text-gray-900">{preset.name}</h3>
-                            <p className="text-sm text-gray-500">{categorySettings.length} 个设定</p>
+                            <h3 className="font-semibold text-[var(--text-primary)]">{preset.name}</h3>
+                            <p className="text-sm text-[var(--text-muted)]">{categorySettings.length} 个设定</p>
                           </div>
                         </div>
                         {isExpanded ? (
-                          <ChevronDown className="w-5 h-5 text-gray-400" />
+                          <ChevronDown className="w-5 h-5 text-[var(--text-muted)]" />
                         ) : (
-                          <ChevronRight className="w-5 h-5 text-gray-400" />
+                          <ChevronRight className="w-5 h-5 text-[var(--text-muted)]" />
                         )}
                       </button>
 
                       {isExpanded && (
-                        <div className="border-t border-gray-100">
+                        <div className="border-t border-[var(--border-color)]">
                           {categorySettings.map(setting => (
                             <div
                               key={setting.id}
-                              className="p-4 border-b border-gray-100 last:border-b-0 hover:bg-gray-50 transition-colors"
+                              className="p-4 border-b border-[var(--border-color)] last:border-b-0 hover:bg-[var(--bg-hover)] transition-colors"
                             >
                               <div className="flex justify-between items-start">
                                 <div className="flex-1">
-                                  <h4 className="font-medium text-gray-900">{setting.name}</h4>
+                                  <h4 className="font-medium text-[var(--text-primary)]">{setting.name}</h4>
                                   {setting.description && (
-                                    <p className="text-sm text-gray-600 mt-1 line-clamp-2">
+                                    <p className="text-sm text-[var(--text-secondary)] mt-1 line-clamp-2">
                                       {setting.description}
                                     </p>
                                   )}
@@ -367,13 +375,13 @@ export function WorldSettings() {
                                       {setting.items.slice(0, 3).map((item: { name: string }, i: number) => (
                                         <span
                                           key={i}
-                                          className="text-xs bg-gray-100 text-gray-600 px-2 py-1 rounded"
+                                          className="text-xs bg-[var(--bg-tertiary)] text-[var(--text-secondary)] px-2 py-1 rounded"
                                         >
                                           {item.name}
                                         </span>
                                       ))}
                                       {setting.items.length > 3 && (
-                                        <span className="text-xs text-gray-400">
+                                        <span className="text-xs text-[var(--text-muted)]">
                                           +{setting.items.length - 3} 更多
                                         </span>
                                       )}
@@ -395,13 +403,13 @@ export function WorldSettings() {
                                   </Button>
                                   <button
                                     onClick={() => handleEdit(setting)}
-                                    className="p-1 text-gray-400 hover:text-blue-600"
+                                    className="p-1 text-[var(--text-muted)] hover:text-[var(--accent-color)]"
                                   >
                                     <Edit2 className="w-4 h-4" />
                                   </button>
                                   <button
                                     onClick={() => handleDelete(setting)}
-                                    className="p-1 text-gray-400 hover:text-red-600"
+                                    className="p-1 text-[var(--text-muted)] hover:text-red-600"
                                   >
                                     <Trash2 className="w-4 h-4" />
                                   </button>
@@ -414,7 +422,7 @@ export function WorldSettings() {
                               variant="ghost"
                               size="sm"
                               onClick={() => handleCreate(preset.name)}
-                              className="w-full text-sm text-gray-500 hover:text-blue-600"
+                              className="w-full text-sm text-[var(--text-muted)] hover:text-[var(--accent-color)]"
                             >
                               <Plus className="w-4 h-4 mr-2" />
                               添加 {preset.name} 设定
@@ -428,24 +436,24 @@ export function WorldSettings() {
 
                 {getUncategorizedSettings().length > 0 && (
                   <Card>
-                    <div className="p-4 border-b border-gray-100">
-                      <h3 className="font-semibold text-gray-900">其他设定</h3>
+                    <div className="p-4 border-b border-[var(--border-color)]">
+                      <h3 className="font-semibold text-[var(--text-primary)]">其他设定</h3>
                     </div>
                     {getUncategorizedSettings().map(setting => (
                       <div
                         key={setting.id}
-                        className="p-4 border-b border-gray-100 last:border-b-0 hover:bg-gray-50 transition-colors"
+                        className="p-4 border-b border-[var(--border-color)] last:border-b-0 hover:bg-[var(--bg-hover)] transition-colors"
                       >
                         <div className="flex justify-between items-start">
                           <div className="flex-1">
                             <div className="flex items-center gap-2">
-                              <h4 className="font-medium text-gray-900">{setting.name}</h4>
-                              <span className="text-xs bg-gray-100 text-gray-500 px-2 py-0.5 rounded">
+                              <h4 className="font-medium text-[var(--text-primary)]">{setting.name}</h4>
+                              <span className="text-xs bg-[var(--bg-tertiary)] text-[var(--text-muted)] px-2 py-0.5 rounded">
                                 {setting.category}
                               </span>
                             </div>
                             {setting.description && (
-                              <p className="text-sm text-gray-600 mt-1 line-clamp-2">
+                              <p className="text-sm text-[var(--text-secondary)] mt-1 line-clamp-2">
                                 {setting.description}
                               </p>
                             )}
@@ -465,13 +473,13 @@ export function WorldSettings() {
                             </Button>
                             <button
                               onClick={() => handleEdit(setting)}
-                              className="p-1 text-gray-400 hover:text-blue-600"
+                              className="p-1 text-[var(--text-muted)] hover:text-[var(--accent-color)]"
                             >
                               <Edit2 className="w-4 h-4" />
                             </button>
                             <button
                               onClick={() => handleDelete(setting)}
-                              className="p-1 text-gray-400 hover:text-red-600"
+                              className="p-1 text-[var(--text-muted)] hover:text-red-400"
                             >
                               <Trash2 className="w-4 h-4" />
                             </button>
@@ -487,9 +495,9 @@ export function WorldSettings() {
 
           <div className="space-y-4">
             <Card>
-              <div className="p-4 border-b border-gray-100">
-                <h3 className="font-semibold text-gray-900">预设分类</h3>
-                <p className="text-sm text-gray-500 mt-1">快速添加设定</p>
+              <div className="p-4 border-b border-[var(--border-color)]">
+                <h3 className="font-semibold text-[var(--text-primary)]">预设分类</h3>
+                <p className="text-sm text-[var(--text-muted)] mt-1">快速添加设定</p>
               </div>
               <div className="p-2">
                 {PRESET_CATEGORIES.map(preset => {
@@ -500,17 +508,17 @@ export function WorldSettings() {
                     <button
                       key={preset.id}
                       onClick={() => handleCreate(preset.name)}
-                      className="w-full flex items-center gap-3 p-3 rounded-lg hover:bg-gray-50 transition-colors text-left"
+                      className="w-full flex items-center gap-3 p-3 rounded-lg hover:bg-[var(--bg-hover)] transition-colors text-left"
                     >
                       <div className={`p-2 rounded-lg ${preset.color}`}>
-                        <Icon className="w-4 h-4 text-white" />
+                            <Icon className="w-4 h-4 text-[var(--text-primary)]" />
                       </div>
                       <div className="flex-1">
-                        <div className="font-medium text-gray-900 text-sm">{preset.name}</div>
-                        <div className="text-xs text-gray-500">{preset.items.length} 个子项</div>
+                        <div className="font-medium text-[var(--text-primary)] text-sm">{preset.name}</div>
+                        <div className="text-xs text-[var(--text-muted)]">{preset.items.length} 个子项</div>
                       </div>
                       {count > 0 && (
-                        <span className="text-xs bg-blue-100 text-blue-700 px-2 py-0.5 rounded">
+                        <span className="text-xs bg-[var(--accent-color)]/20 text-[var(--accent-color)] px-2 py-0.5 rounded">
                           {count}
                         </span>
                       )}
@@ -521,18 +529,18 @@ export function WorldSettings() {
             </Card>
 
             <Card>
-              <div className="p-4 border-b border-gray-100">
-                <h3 className="font-semibold text-gray-900">统计</h3>
+              <div className="p-4 border-b border-[var(--border-color)]">
+                <h3 className="font-semibold text-[var(--text-primary)]">统计</h3>
               </div>
               <div className="p-4">
                 <div className="grid grid-cols-2 gap-4">
                   <div className="text-center">
-                    <div className="text-2xl font-bold text-blue-600">{settings.length}</div>
-                    <div className="text-sm text-gray-500">设定总数</div>
+                    <div className="text-2xl font-bold text-[var(--accent-color)]">{settings.length}</div>
+                    <div className="text-sm text-[var(--text-muted)]">设定总数</div>
                   </div>
                   <div className="text-center">
-                    <div className="text-2xl font-bold text-green-600">{categories.size}</div>
-                    <div className="text-sm text-gray-500">分类数量</div>
+                    <div className="text-2xl font-bold text-green-400">{categories.size}</div>
+                    <div className="text-sm text-[var(--text-muted)]">分类数量</div>
                   </div>
                 </div>
               </div>
@@ -558,11 +566,11 @@ export function WorldSettings() {
       >
         <div className="space-y-4">
           <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">分类</label>
+            <label className="block text-sm font-medium text-[var(--text-secondary)] mb-1">分类</label>
             <select
               value={formData.category}
               onChange={(e) => setFormData({ ...formData, category: e.target.value })}
-              className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+              className="w-full px-3 py-2 border border-[var(--border-color)] rounded-lg focus:ring-2 focus:ring-[var(--accent-color)] focus:border-[var(--accent-color)] bg-[var(--bg-secondary)] text-[var(--text-primary)]"
             >
               <option value="">选择分类...</option>
               {PRESET_CATEGORIES.map(preset => (
@@ -573,7 +581,7 @@ export function WorldSettings() {
           </div>
 
           <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">名称</label>
+            <label className="block text-sm font-medium text-[var(--text-secondary)] mb-1">名称</label>
             <Input
               value={formData.name}
               onChange={(e) => setFormData({ ...formData, name: e.target.value })}
@@ -582,7 +590,7 @@ export function WorldSettings() {
           </div>
 
           <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">描述</label>
+            <label className="block text-sm font-medium text-[var(--text-secondary)] mb-1">描述</label>
             <Textarea
               value={formData.description}
               onChange={(e) => setFormData({ ...formData, description: e.target.value })}
@@ -593,7 +601,7 @@ export function WorldSettings() {
 
           <div>
             <div className="flex justify-between items-center mb-2">
-              <label className="text-sm font-medium text-gray-700">详细子项</label>
+              <label className="text-sm font-medium text-[var(--text-secondary)]">详细子项</label>
               <Button variant="outline" size="sm" onClick={addItem}>
                 <Plus className="w-4 h-4 mr-1" />
                 添加子项
@@ -603,7 +611,7 @@ export function WorldSettings() {
             {formData.items.length > 0 && (
               <div className="space-y-2">
                 {formData.items.map((item: WorldSettingItem, index: number) => (
-                  <div key={index} className="flex gap-2 items-start p-2 bg-gray-50 rounded-lg">
+                  <div key={index} className="flex gap-2 items-start p-2 bg-[var(--bg-tertiary)] rounded-lg">
                     <div className="flex-1 space-y-2">
                       <Input
                         value={item.name}
@@ -620,7 +628,7 @@ export function WorldSettings() {
                     </div>
                     <button
                       onClick={() => removeItem(index)}
-                      className="p-1 text-gray-400 hover:text-red-600"
+                      className="p-1 text-[var(--text-muted)] hover:text-red-400"
                     >
                       <Trash2 className="w-4 h-4" />
                     </button>
@@ -630,13 +638,21 @@ export function WorldSettings() {
             )}
 
             {formData.items.length === 0 && (
-              <div className="text-center py-4 text-gray-500 text-sm border-2 border-dashed border-gray-200 rounded-lg">
+              <div className="text-center py-4 text-[var(--text-muted)] text-sm border-2 border-dashed border-[var(--border-color)] rounded-lg">
                 点击上方按钮添加详细子项
               </div>
             )}
           </div>
         </div>
       </Modal>
+
+      <DeleteConfirmModal
+        isOpen={deleteModal.isOpen}
+        onClose={() => setDeleteModal({ isOpen: false, setting: null })}
+        onConfirm={handleConfirmDelete}
+        title={`确定要删除「${deleteModal.setting?.name || ''}」吗？`}
+        message="删除后将无法恢复，请谨慎操作"
+      />
     </div>
   );
 }

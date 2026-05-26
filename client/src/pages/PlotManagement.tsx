@@ -14,15 +14,16 @@ import { Input } from '../components/ui/Input'
 import { Textarea } from '../components/ui/Textarea'
 import { Modal } from '../components/ui/Modal'
 import { Select } from '../components/ui/Select'
+import { DeleteConfirmModal } from '../components/DeleteConfirmModal'
 import { plotsApi, Plot, PlotPoint, CreatePlotDto, CreatePlotPointDto } from '../api/plots'
 
 const PLOT_POINT_TYPES = [
-  { value: 'exposition', label: '开端', color: 'bg-blue-100 text-blue-700' },
-  { value: 'rising_action', label: '上升', color: 'bg-green-100 text-green-700' },
-  { value: 'climax', label: '高潮', color: 'bg-red-100 text-red-700' },
-  { value: 'falling_action', label: '下降', color: 'bg-yellow-100 text-yellow-700' },
-  { value: 'resolution', label: '结局', color: 'bg-purple-100 text-purple-700' },
-  { value: 'subplot', label: '副线', color: 'bg-gray-100 text-gray-700' },
+  { value: 'exposition', label: '开端', color: 'bg-blue-900/30 text-blue-400' },
+  { value: 'rising_action', label: '上升', color: 'bg-green-900/30 text-green-400' },
+  { value: 'climax', label: '高潮', color: 'bg-red-900/30 text-red-400' },
+  { value: 'falling_action', label: '下降', color: 'bg-yellow-900/30 text-yellow-400' },
+  { value: 'resolution', label: '结局', color: 'bg-purple-900/30 text-purple-400' },
+  { value: 'subplot', label: '副线', color: 'bg-gray-800 text-gray-400' },
 ]
 
 const PLOT_STATUS_OPTIONS = [
@@ -43,6 +44,7 @@ export function PlotManagement() {
   const [isLoading, setIsLoading] = useState(true)
   const [editingPoint, setEditingPoint] = useState<PlotPoint | null>(null)
   const [draggedPoint, setDraggedPoint] = useState<PlotPoint | null>(null)
+  const [deleteModal, setDeleteModal] = useState<{ isOpen: boolean; type: 'plot' | 'point'; item: Plot | PlotPoint | null }>({ isOpen: false, type: 'plot', item: null })
 
   const [plotFormData, setPlotFormData] = useState<CreatePlotDto>({
     title: '',
@@ -95,15 +97,34 @@ export function PlotManagement() {
   }
 
   const handleDeletePlot = async (plot: Plot) => {
-    if (!projectId || !confirm(`确定要删除情节线「${plot.title}」吗？`)) return
+    setDeleteModal({ isOpen: true, type: 'plot', item: plot })
+  }
+
+  const handleDeletePoint = async (point: PlotPoint) => {
+    setDeleteModal({ isOpen: true, type: 'point', item: point })
+  }
+
+  const handleConfirmDelete = async () => {
+    if (!projectId || !deleteModal.item) return
     try {
-      await plotsApi.delete(projectId, plot.id)
-      await loadPlots()
-      if (selectedPlot?.id === plot.id) {
-        setSelectedPlot(null)
+      if (deleteModal.type === 'plot' && deleteModal.item instanceof Object) {
+        const plot = deleteModal.item as Plot
+        await plotsApi.delete(projectId, plot.id)
+        await loadPlots()
+        if (selectedPlot?.id === plot.id) {
+          setSelectedPlot(null)
+        }
+      } else if (deleteModal.type === 'point' && deleteModal.item instanceof Object && selectedPlot) {
+        const point = deleteModal.item as PlotPoint
+        await plotsApi.deletePlotPoint(projectId, selectedPlot.id, point.id)
+        await loadPlots()
+        const updatedPlot = await plotsApi.getById(projectId, selectedPlot.id)
+        setSelectedPlot(updatedPlot)
       }
     } catch (error) {
       console.error('删除失败:', error)
+    } finally {
+      setDeleteModal({ isOpen: false, type: 'plot', item: null })
     }
   }
 
@@ -145,17 +166,7 @@ export function PlotManagement() {
     setIsPointEditModalOpen(true)
   }
 
-  const handleDeletePoint = async (point: PlotPoint) => {
-    if (!projectId || !selectedPlot || !confirm(`确定要删除情节点「${point.title}」吗？`)) return
-    try {
-      await plotsApi.deletePlotPoint(projectId, selectedPlot.id, point.id)
-      await loadPlots()
-      const updatedPlot = await plotsApi.getById(projectId, selectedPlot.id)
-      setSelectedPlot(updatedPlot)
-    } catch (error) {
-      console.error('删除情节点失败:', error)
-    }
-  }
+  
 
   const handleSubmitPoint = async () => {
     if (!projectId || !selectedPlot || !pointFormData.title.trim()) return
@@ -214,19 +225,19 @@ export function PlotManagement() {
 
   if (isLoading) {
     return (
-      <div className="p-8 flex items-center justify-center">
-        <div className="text-gray-500">加载中...</div>
+      <div className="h-full bg-[var(--bg-primary)] p-4 flex items-center justify-center overflow-y-auto">
+        <div className="text-[var(--text-muted)]">加载中...</div>
       </div>
-    )
+    );
   }
 
   return (
-    <div className="min-h-screen bg-gray-50 p-6">
+    <div className="h-full bg-[var(--bg-primary)] p-4 overflow-y-auto">
       <div className="max-w-7xl mx-auto">
         <div className="flex justify-between items-center mb-6">
           <div>
-            <h1 className="text-2xl font-bold text-gray-900">情节线管理</h1>
-            <p className="text-gray-600 mt-1">规划和管理故事的情节发展线</p>
+            <h1 className="text-2xl font-bold text-[var(--text-primary)]">情节线管理</h1>
+            <p className="text-[var(--text-muted)] mt-1">规划和管理故事的情节发展线</p>
           </div>
           <Button onClick={handleCreatePlot}>
             <Plus className="w-4 h-4 mr-2" />
@@ -237,34 +248,34 @@ export function PlotManagement() {
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
           <div className="lg:col-span-1">
             <Card className="p-0">
-              <div className="p-4 border-b bg-white">
-                <h2 className="font-semibold text-gray-900">情节线列表</h2>
+              <div className="p-4 border-b border-[var(--border-color)] bg-[var(--bg-tertiary)]">
+                <h2 className="font-semibold text-[var(--text-primary)]">情节线列表</h2>
               </div>
-              <div className="divide-y max-h-[600px] overflow-y-auto">
+              <div className="divide-y divide-[var(--border-color)] max-h-[600px] overflow-y-auto">
                 {plots.length > 0 ? (
                   plots.map(plot => (
                     <div
                       key={plot.id}
                       onClick={() => setSelectedPlot(plot)}
-                      className={`p-4 cursor-pointer transition-colors hover:bg-gray-50 ${
-                        selectedPlot?.id === plot.id ? 'bg-blue-50 border-l-4 border-blue-500' : ''
+                      className={`p-4 cursor-pointer transition-colors hover:bg-[var(--bg-hover)] ${
+                        selectedPlot?.id === plot.id ? 'bg-[var(--accent-color)]/10 border-l-4 border-[var(--accent-color)]' : ''
                       }`}
                     >
                       <div className="flex justify-between items-start">
                         <div className="flex-1 min-w-0">
-                          <h3 className="font-medium text-gray-900 truncate">{plot.title}</h3>
+                          <h3 className="font-medium text-[var(--text-primary)] truncate">{plot.title}</h3>
                           {plot.description && (
-                            <p className="text-sm text-gray-500 mt-1 line-clamp-2">{plot.description}</p>
+                            <p className="text-sm text-[var(--text-muted)] mt-1 line-clamp-2">{plot.description}</p>
                           )}
                           <div className="flex items-center gap-2 mt-2">
                             <span className={`text-xs px-2 py-0.5 rounded ${
-                              plot.status === 'ACTIVE' ? 'bg-green-100 text-green-700' :
-                              plot.status === 'COMPLETED' ? 'bg-blue-100 text-blue-700' :
-                              'bg-gray-100 text-gray-600'
+                              plot.status === 'ACTIVE' ? 'bg-green-900/30 text-green-400' :
+                              plot.status === 'COMPLETED' ? 'bg-[var(--accent-color)]/20 text-[var(--accent-color)]' :
+                              'bg-gray-800 text-[var(--text-muted)]'
                             }`}>
                               {plot.status === 'ACTIVE' ? '进行中' : plot.status === 'COMPLETED' ? '已完成' : '已放弃'}
                             </span>
-                            <span className="text-xs text-gray-400">
+                            <span className="text-xs text-[var(--text-muted)]">
                               {plot.plotPoints.length} 个情节点
                             </span>
                           </div>
@@ -275,7 +286,7 @@ export function PlotManagement() {
                               e.stopPropagation()
                               handleEditPlot(plot)
                             }}
-                            className="p-1 text-gray-400 hover:text-blue-600"
+                            className="p-1 text-[var(--text-muted)] hover:text-[var(--accent-color)]"
                           >
                             <Edit2 className="w-4 h-4" />
                           </button>
@@ -284,7 +295,7 @@ export function PlotManagement() {
                               e.stopPropagation()
                               handleDeletePlot(plot)
                             }}
-                            className="p-1 text-gray-400 hover:text-red-600"
+                            className="p-1 text-[var(--text-muted)] hover:text-red-400"
                           >
                             <Trash2 className="w-4 h-4" />
                           </button>
@@ -294,9 +305,9 @@ export function PlotManagement() {
                   ))
                 ) : (
                   <div className="p-8 text-center">
-                    <GitBranch className="w-12 h-12 mx-auto text-gray-400 mb-4" />
-                    <h3 className="text-lg font-medium text-gray-900 mb-2">还没有情节线</h3>
-                    <p className="text-gray-500 mb-4">开始创建你的第一个情节线吧</p>
+                    <GitBranch className="w-12 h-12 mx-auto text-[var(--text-muted)] mb-4" />
+                    <h3 className="text-lg font-medium text-[var(--text-primary)] mb-2">还没有情节线</h3>
+                    <p className="text-[var(--text-muted)] mb-4">开始创建你的第一个情节线吧</p>
                     <Button onClick={handleCreatePlot} size="sm">创建情节线</Button>
                   </div>
                 )}
@@ -307,11 +318,11 @@ export function PlotManagement() {
           <div className="lg:col-span-2">
             {selectedPlot ? (
               <Card className="p-0">
-                <div className="p-4 border-b bg-white flex justify-between items-center">
+                <div className="p-4 border-b border-[var(--border-color)] bg-[var(--bg-tertiary)] flex justify-between items-center">
                   <div>
-                    <h2 className="font-semibold text-lg text-gray-900">{selectedPlot.title}</h2>
+                    <h2 className="font-semibold text-lg text-[var(--text-primary)]">{selectedPlot.title}</h2>
                     {selectedPlot.description && (
-                      <p className="text-sm text-gray-500 mt-1">{selectedPlot.description}</p>
+                      <p className="text-sm text-[var(--text-muted)] mt-1">{selectedPlot.description}</p>
                     )}
                   </div>
                   <Button onClick={handleAddPoint}>
@@ -323,7 +334,7 @@ export function PlotManagement() {
                 <div className="p-6">
                   {selectedPlot.plotPoints.length > 0 ? (
                     <div className="relative">
-                      <div className="absolute left-6 top-0 bottom-0 w-0.5 bg-gradient-to-b from-blue-500 via-purple-500 to-red-500" />
+                      <div className="absolute left-6 top-0 bottom-0 w-0.5 bg-gradient-to-b from-[var(--accent-color)] via-purple-500 to-red-500" />
 
                       <div className="space-y-4">
                         {selectedPlot.plotPoints.map((point, index) => {
@@ -339,34 +350,34 @@ export function PlotManagement() {
                                 draggedPoint?.id === point.id ? 'opacity-50' : ''
                               }`}
                             >
-                              <div className="absolute left-4 top-4 w-4 h-4 rounded-full bg-white border-2 border-blue-500 flex items-center justify-center">
-                                <span className="text-xs font-medium text-blue-600">{index + 1}</span>
+                              <div className="absolute left-4 top-4 w-4 h-4 rounded-full bg-[var(--bg-secondary)] border-2 border-[var(--accent-color)] flex items-center justify-center">
+                                <span className="text-xs font-medium text-[var(--accent-color)]">{index + 1}</span>
                               </div>
 
-                              <div className="bg-white border rounded-lg p-4 shadow-sm hover:shadow-md transition-shadow">
+                              <div className="bg-[var(--bg-secondary)] border border-[var(--border-color)] rounded-lg p-4 shadow-sm hover:shadow-md transition-shadow">
                                 <div className="flex justify-between items-start">
                                   <div className="flex-1">
                                     <div className="flex items-center gap-2 mb-2">
-                                      <GripVertical className="w-4 h-4 text-gray-400 opacity-0 group-hover:opacity-100 transition-opacity" />
-                                      <h4 className="font-medium text-gray-900">{point.title}</h4>
+                                      <GripVertical className="w-4 h-4 text-[var(--text-muted)] opacity-0 group-hover:opacity-100 transition-opacity" />
+                                      <h4 className="font-medium text-[var(--text-primary)]">{point.title}</h4>
                                       <span className={`text-xs px-2 py-0.5 rounded ${typeInfo.color}`}>
                                         {typeInfo.label}
                                       </span>
                                     </div>
                                     {point.description && (
-                                      <p className="text-sm text-gray-600 mt-2">{point.description}</p>
+                                      <p className="text-sm text-[var(--text-secondary)] mt-2">{point.description}</p>
                                     )}
                                   </div>
                                   <div className="flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
                                     <button
                                       onClick={() => handleEditPoint(point)}
-                                      className="p-1 text-gray-400 hover:text-blue-600"
+                                      className="p-1 text-[var(--text-muted)] hover:text-[var(--accent-color)]"
                                     >
                                       <Edit2 className="w-4 h-4" />
                                     </button>
                                     <button
                                       onClick={() => handleDeletePoint(point)}
-                                      className="p-1 text-gray-400 hover:text-red-600"
+                                      className="p-1 text-[var(--text-muted)] hover:text-red-400"
                                     >
                                       <Trash2 className="w-4 h-4" />
                                     </button>
@@ -380,9 +391,9 @@ export function PlotManagement() {
                     </div>
                   ) : (
                     <div className="text-center py-12">
-                      <Clock className="w-12 h-12 mx-auto text-gray-400 mb-4" />
-                      <h3 className="text-lg font-medium text-gray-900 mb-2">还没有情节点</h3>
-                      <p className="text-gray-500 mb-4">为此情节线添加情节点来规划故事发展</p>
+                      <Clock className="w-12 h-12 mx-auto text-[var(--text-muted)] mb-4" />
+                      <h3 className="text-lg font-medium text-[var(--text-primary)] mb-2">还没有情节点</h3>
+                      <p className="text-[var(--text-muted)] mb-4">为此情节线添加情节点来规划故事发展</p>
                       <Button onClick={handleAddPoint}>添加情节点</Button>
                     </div>
                   )}
@@ -390,9 +401,9 @@ export function PlotManagement() {
               </Card>
             ) : (
               <Card className="p-12 text-center">
-                <GitBranch className="w-16 h-16 mx-auto text-gray-300 mb-4" />
-                <h3 className="text-lg font-medium text-gray-900 mb-2">选择一条情节线</h3>
-                <p className="text-gray-500">从左侧列表选择一条情节线进行编辑，或创建新的情节线</p>
+                <GitBranch className="w-16 h-16 mx-auto text-[var(--text-muted)] mb-4" />
+                <h3 className="text-lg font-medium text-[var(--text-primary)] mb-2">选择一条情节线</h3>
+                <p className="text-[var(--text-muted)]">从左侧列表选择一条情节线进行编辑，或创建新的情节线</p>
               </Card>
             )}
           </div>
@@ -406,7 +417,7 @@ export function PlotManagement() {
       >
         <div className="space-y-4">
           <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">标题 *</label>
+            <label className="block text-sm font-medium text-[var(--text-secondary)] mb-1">标题 *</label>
             <Input
               value={plotFormData.title}
               onChange={(e) => setPlotFormData({ ...plotFormData, title: e.target.value })}
@@ -415,7 +426,7 @@ export function PlotManagement() {
           </div>
 
           <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">描述</label>
+            <label className="block text-sm font-medium text-[var(--text-secondary)] mb-1">描述</label>
             <Textarea
               value={plotFormData.description}
               onChange={(e) => setPlotFormData({ ...plotFormData, description: e.target.value })}
@@ -425,7 +436,7 @@ export function PlotManagement() {
           </div>
 
           <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">状态</label>
+            <label className="block text-sm font-medium text-[var(--text-secondary)] mb-1">状态</label>
             <Select
               value={plotFormData.status}
               onChange={(e) => setPlotFormData({ ...plotFormData, status: e.target.value })}
@@ -438,7 +449,7 @@ export function PlotManagement() {
           </div>
         </div>
 
-        <div className="flex justify-end gap-3 pt-4 border-t mt-4">
+        <div className="flex justify-end gap-3 pt-4 border-t border-[var(--border-color)] mt-4">
           <Button variant="outline" onClick={() => setIsPlotModalOpen(false)}>取消</Button>
           <Button onClick={handleSubmitPlot} disabled={!plotFormData.title.trim()}>
             {plotModalMode === 'create' ? '创建' : '保存'}
@@ -453,7 +464,7 @@ export function PlotManagement() {
       >
         <div className="space-y-4">
           <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">标题 *</label>
+            <label className="block text-sm font-medium text-[var(--text-secondary)] mb-1">标题 *</label>
             <Input
               value={pointFormData.title}
               onChange={(e) => setPointFormData({ ...pointFormData, title: e.target.value })}
@@ -462,7 +473,7 @@ export function PlotManagement() {
           </div>
 
           <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">类型</label>
+            <label className="block text-sm font-medium text-[var(--text-secondary)] mb-1">类型</label>
             <Select
               value={pointFormData.type}
               onChange={(e) => setPointFormData({ ...pointFormData, type: e.target.value })}
@@ -475,7 +486,7 @@ export function PlotManagement() {
           </div>
 
           <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">描述</label>
+            <label className="block text-sm font-medium text-[var(--text-secondary)] mb-1">描述</label>
             <Textarea
               value={pointFormData.description}
               onChange={(e) => setPointFormData({ ...pointFormData, description: e.target.value })}
@@ -485,7 +496,7 @@ export function PlotManagement() {
           </div>
         </div>
 
-        <div className="flex justify-end gap-3 pt-4 border-t mt-4">
+        <div className="flex justify-end gap-3 pt-4 border-t border-[var(--border-color)] mt-4">
           <Button variant="outline" onClick={() => setIsPointModalOpen(false)}>取消</Button>
           <Button onClick={handleSubmitPoint} disabled={!pointFormData.title.trim()}>
             添加
@@ -500,7 +511,7 @@ export function PlotManagement() {
       >
         <div className="space-y-4">
           <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">标题 *</label>
+            <label className="block text-sm font-medium text-[var(--text-secondary)] mb-1">标题 *</label>
             <Input
               value={pointFormData.title}
               onChange={(e) => setPointFormData({ ...pointFormData, title: e.target.value })}
@@ -509,7 +520,7 @@ export function PlotManagement() {
           </div>
 
           <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">类型</label>
+            <label className="block text-sm font-medium text-[var(--text-secondary)] mb-1">类型</label>
             <Select
               value={pointFormData.type}
               onChange={(e) => setPointFormData({ ...pointFormData, type: e.target.value })}
@@ -522,7 +533,7 @@ export function PlotManagement() {
           </div>
 
           <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">描述</label>
+            <label className="block text-sm font-medium text-[var(--text-secondary)] mb-1">描述</label>
             <Textarea
               value={pointFormData.description}
               onChange={(e) => setPointFormData({ ...pointFormData, description: e.target.value })}
@@ -532,13 +543,21 @@ export function PlotManagement() {
           </div>
         </div>
 
-        <div className="flex justify-end gap-3 pt-4 border-t mt-4">
+        <div className="flex justify-end gap-3 pt-4 border-t border-[var(--border-color)] mt-4">
           <Button variant="outline" onClick={() => setIsPointEditModalOpen(false)}>取消</Button>
           <Button onClick={handleSubmitPoint} disabled={!pointFormData.title.trim()}>
             保存
           </Button>
         </div>
       </Modal>
+
+      <DeleteConfirmModal
+        isOpen={deleteModal.isOpen}
+        onClose={() => setDeleteModal({ isOpen: false, type: 'plot', item: null })}
+        onConfirm={handleConfirmDelete}
+        title={`确定要删除${deleteModal.type === 'plot' ? '情节线' : '情节点'}「${(deleteModal.item as any)?.title || ''}」吗？`}
+        message="删除后将无法恢复，请谨慎操作"
+      />
     </div>
   )
 }

@@ -5,6 +5,7 @@ import { Input } from '@/components/ui/Input';
 import { Button } from '@/components/ui/Button';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/Card';
 import { authApi } from '@/api/auth';
+import { projectsApi } from '@/api/projects';
 import { useAuthStore } from '@/store/auth';
 
 export const Login = () => {
@@ -23,7 +24,17 @@ export const Login = () => {
       const response = await authApi.login(formData);
       const token = response.token || (response as any).accessToken;
       setAuth(response.user, token);
-      navigate('/projects');
+      
+      try {
+        const projects = await projectsApi.getAll();
+        if (projects.length > 0) {
+          navigate(`/projects/${projects[0].id}`);
+        } else {
+          navigate('/projects');
+        }
+      } catch {
+        navigate('/projects');
+      }
     } catch (err: any) {
       setError(err.response?.data?.message || '登录失败，请重试');
     } finally {
@@ -32,24 +43,24 @@ export const Login = () => {
   };
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-indigo-50 via-white to-amber-50">
+    <div className="min-h-screen flex items-center justify-center bg-[var(--bg-primary)]">
       <div className="absolute inset-0 overflow-hidden">
-        <div className="absolute -top-40 -right-40 w-80 h-80 bg-indigo-200/30 rounded-full blur-3xl" />
-        <div className="absolute -bottom-40 -left-40 w-80 h-80 bg-amber-200/30 rounded-full blur-3xl" />
+        <div className="absolute -top-40 -right-40 w-80 h-80 bg-blue-600/10 rounded-full blur-3xl" />
+        <div className="absolute -bottom-40 -left-40 w-80 h-80 bg-indigo-600/10 rounded-full blur-3xl" />
       </div>
       
-      <Card className="w-full max-w-md mx-4 relative z-10 shadow-xl">
+      <Card className="w-full max-w-md mx-4 relative z-10 shadow-2xl">
         <CardHeader className="text-center">
-          <div className="mx-auto w-16 h-16 bg-gradient-to-br from-indigo-600 to-indigo-400 rounded-2xl flex items-center justify-center mb-4">
+          <div className="mx-auto w-16 h-16 bg-gradient-to-br from-[var(--accent-color)] to-blue-500 rounded-2xl flex items-center justify-center mb-4">
             <PenLine className="w-8 h-8 text-white" />
           </div>
           <CardTitle className="text-2xl">欢迎回来</CardTitle>
           <CardDescription>登录您的小说创作平台账号</CardDescription>
         </CardHeader>
-        <CardContent>
+        <CardContent className="space-y-5">
           <form onSubmit={handleSubmit} className="space-y-4">
             {error && (
-              <div className="p-3 bg-red-50 border border-red-200 rounded-lg text-red-600 text-sm">
+              <div className="p-3 bg-red-900/30 border border-red-700 rounded-lg text-[var(--danger-color)] text-sm">
                 {error}
               </div>
             )}
@@ -69,13 +80,17 @@ export const Login = () => {
               onChange={(e) => setFormData({ ...formData, password: e.target.value })}
               required
             />
-            <Button type="submit" className="w-full" isLoading={isLoading}>
+            <Button 
+              type="submit" 
+              className="w-full"
+              isLoading={isLoading}
+            >
               登录
             </Button>
           </form>
-          <p className="mt-6 text-center text-sm text-gray-600">
+          <p className="mt-4 text-center text-sm text-[var(--text-muted)]">
             还没有账号？{' '}
-            <Link to="/register" className="text-indigo-600 font-medium hover:text-indigo-700">
+            <Link to="/register" className="text-[var(--accent-color)] font-medium hover:opacity-80 transition-colors">
               立即注册
             </Link>
           </p>

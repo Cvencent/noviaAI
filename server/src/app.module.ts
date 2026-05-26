@@ -23,6 +23,8 @@ import { DialogueSessionsModule } from './modules/dialogue-sessions/dialogue-ses
 import { StorySystemModule } from './modules/story-system/story-system.module'
 import { ReaderExperienceModule } from './modules/reader-experience/reader-experience.module'
 import { ChekhovsGunsModule } from './modules/chekhovs-guns/chekhovs-guns.module'
+import { ConversationsModule } from './modules/conversations/conversations.module'
+import { AIActionsModule } from './modules/ai-actions/ai-actions.module'
 
 @Module({
   imports: [
@@ -52,6 +54,8 @@ import { ChekhovsGunsModule } from './modules/chekhovs-guns/chekhovs-guns.module
     StorySystemModule,
     ReaderExperienceModule,
     ChekhovsGunsModule,
+    ConversationsModule,
+    AIActionsModule,
   ],
 })
 export class AppModule {}

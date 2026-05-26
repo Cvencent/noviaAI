@@ -125,7 +125,7 @@ export const UsageLogs = () => {
 
   if (statsLoading) {
     return (
-      <div className="p-6">
+      <div className="h-full p-4 overflow-y-auto">
         <div className="animate-pulse space-y-4">
           <div className="h-8 bg-gray-200 rounded w-1/4"></div>
           <div className="grid grid-cols-4 gap-4">
@@ -139,7 +139,7 @@ export const UsageLogs = () => {
   }
 
   return (
-    <div className="p-6 space-y-6">
+    <div className="h-full p-4 overflow-y-auto space-y-6">
       <div className="flex items-center justify-between">
         <h1 className="text-2xl font-bold text-gray-900">使用日志</h1>
         <div className="flex gap-2">

@@ -133,40 +133,38 @@ export function ProjectSettings() {
 
   if (isLoading) {
     return (
-      <div className="p-6 max-w-4xl mx-auto">
-        <div className="flex items-center justify-center h-64">
-          <Loader2 className="w-8 h-8 animate-spin text-gray-400" />
-        </div>
+      <div className="h-full bg-[var(--bg-primary)] p-4 flex items-center justify-center">
+        <Loader2 className="w-8 h-8 animate-spin text-[var(--text-muted)]" />
       </div>
     )
   }
 
   if (!project) {
     return (
-      <div className="p-6 max-w-4xl mx-auto">
-        <div className="text-center text-gray-500">项目不存在</div>
+      <div className="h-full bg-[var(--bg-primary)] p-6">
+        <div className="text-center text-[var(--text-muted)]">项目不存在</div>
       </div>
     )
   }
 
   return (
-    <div className="p-6 max-w-4xl mx-auto">
+    <div className="h-full bg-[var(--bg-primary)] p-6 overflow-y-auto">
       <div className="flex items-center justify-between mb-6">
         <div className="flex items-center gap-3">
-          <Shield className="w-6 h-6 text-gray-600" />
-          <h1 className="text-2xl font-bold">项目设置</h1>
+          <Shield className="w-6 h-6 text-[var(--text-muted)]" />
+          <h1 className="text-2xl font-bold text-[var(--text-primary)]">项目设置</h1>
         </div>
       </div>
 
       <div className="space-y-6">
         {/* 网文模板 */}
-        <Card className="p-6">
+        <Card className="bg-[var(--bg-secondary)] border-[var(--border-color)] p-6">
           <div className="mb-4">
-            <h2 className="text-lg font-semibold flex items-center gap-2">
+            <h2 className="text-lg font-semibold flex items-center gap-2 text-[var(--text-primary)]">
               <BookOpen className="w-5 h-5" />
               网文模板
             </h2>
-            <p className="text-sm text-gray-600 mt-1">
+            <p className="text-sm text-[var(--text-muted)] mt-1">
               选择适合你作品类型的模板，Story System 会遵循模板的节奏和规则进行写作
             </p>
           </div>
@@ -190,39 +188,42 @@ export function ProjectSettings() {
         </Card>
 
         {/* 基础信息 */}
-        <Card className="p-6">
-          <h2 className="text-lg font-semibold mb-4 flex items-center gap-2">
+        <Card className="bg-[var(--bg-secondary)] border-[var(--border-color)] p-6">
+          <h2 className="text-lg font-semibold mb-4 flex items-center gap-2 text-[var(--text-primary)]">
             <BookOpen className="w-5 h-5" />
             基本信息
           </h2>
           <div className="grid grid-cols-2 gap-4">
             <div className="col-span-2">
-              <label className="block text-sm font-medium text-gray-700 mb-2">
+              <label className="block text-sm font-medium text-[var(--text-secondary)] mb-2">
                 项目标题 *
               </label>
               <Input
                 value={formData.title}
                 onChange={(e) => handleInputChange('title', e.target.value)}
                 placeholder="我的小说"
+                className="bg-[var(--bg-primary)] border-[var(--border-color)] text-[var(--text-primary)]"
               />
             </div>
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-2">
+              <label className="block text-sm font-medium text-[var(--text-secondary)] mb-2">
                 副标题
               </label>
               <Input
                 value={formData.subtitle}
                 onChange={(e) => handleInputChange('subtitle', e.target.value)}
                 placeholder="（可选）"
+                className="bg-[var(--bg-primary)] border-[var(--border-color)] text-[var(--text-primary)]"
               />
             </div>
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-2">
+              <label className="block text-sm font-medium text-[var(--text-secondary)] mb-2">
                 题材 *
               </label>
               <Select
                 value={formData.genre}
                 onChange={(e) => handleInputChange('genre', e.target.value)}
+                className="bg-[var(--bg-primary)] border-[var(--border-color)] text-[var(--text-primary)]"
               >
                 {GENRE_OPTIONS.map(option => (
                   <option key={option.value} value={option.value}>
@@ -247,24 +248,25 @@ export function ProjectSettings() {
               </Select>
             </div>
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-2">
+              <label className="block text-sm font-medium text-[var(--text-secondary)] mb-2">
                 标签
               </label>
               <Input
                 value={formData.tags}
                 onChange={(e) => handleInputChange('tags', e.target.value)}
                 placeholder="标签1, 标签2, 标签3"
+                className="bg-[var(--bg-primary)] border-[var(--border-color)] text-[var(--text-primary)]"
               />
             </div>
             <div className="col-span-2">
-              <label className="block text-sm font-medium text-gray-700 mb-2">
+              <label className="block text-sm font-medium text-[var(--text-secondary)] mb-2">
                 简介
               </label>
               <textarea
                 value={formData.synopsis}
                 onChange={(e) => handleInputChange('synopsis', e.target.value)}
                 rows={4}
-                className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 bg-[var(--bg-primary)] border-[var(--border-color)] text-[var(--text-primary)]"
                 placeholder="这是一个关于..."
               />
             </div>

@@ -12,6 +12,11 @@ export interface AssistantResponse {
   actions: AssistantAction[]
 }
 
+export interface AssistantConversationHistoryMessage {
+  role: 'user' | 'assistant'
+  content: string
+}
+
 export interface ChapterModificationData {
   chapterId: string
   changes: ContentChange[]
@@ -28,11 +33,13 @@ export const aiAssistantApi = {
       chapterContent: string
       chapterTitle: string
     },
+    conversationHistory?: AssistantConversationHistoryMessage[],
   ): Promise<AssistantResponse> {
     const response = await apiClient.post('/ai-assistant/chat', {
       projectId,
       message,
       provider,
+      conversationHistory,
       ...chapterContext,
     })
     return response.data

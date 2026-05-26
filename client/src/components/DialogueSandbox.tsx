@@ -5,6 +5,7 @@ import { Card } from './ui/Card'
 import { Input } from './ui/Input'
 import { Textarea } from './ui/Textarea'
 import { Select } from './ui/Select'
+import { DeleteConfirmModal } from './DeleteConfirmModal'
 import { charactersApi, Character } from '../api/characters'
 import {
   CreateDialogueSessionDto,
@@ -32,6 +33,7 @@ export function DialogueSandbox({ projectId, chapterId, onClose, onInsertText }:
   const [qualityReports, setQualityReports] = useState<DialogueQualityReport[]>([])
   const [improvedCandidate, setImprovedCandidate] = useState<DialogueCandidate | null>(null)
   const [rounds, setRounds] = useState(2)
+  const [deleteModal, setDeleteModal] = useState<{ isOpen: boolean; session: DialogueSession | null }>({ isOpen: false, session: null })
   const [formData, setFormData] = useState<CreateDialogueSessionDto>({
     title: '',
     chapterId,
@@ -158,12 +160,19 @@ export function DialogueSandbox({ projectId, chapterId, onClose, onInsertText }:
     }
   }
 
-  const deleteSession = async () => {
-    if (!selectedSession || !confirm(`确定要删除「${selectedSession.title}」吗？`)) return
-    await dialogueSessionsApi.delete(projectId, selectedSession.id)
-    const nextSessions = sessions.filter((session) => session.id !== selectedSession.id)
+  const deleteSession = () => {
+    if (selectedSession) {
+      setDeleteModal({ isOpen: true, session: selectedSession })
+    }
+  }
+
+  const handleConfirmDelete = async () => {
+    if (!deleteModal.session) return
+    await dialogueSessionsApi.delete(projectId, deleteModal.session.id)
+    const nextSessions = sessions.filter((session) => session.id !== deleteModal.session?.id)
     setSessions(nextSessions)
     setSelectedSession(nextSessions[0] || null)
+    setDeleteModal({ isOpen: false, session: null })
   }
 
   const replaceSession = (updated: DialogueSession) => {
@@ -190,7 +199,7 @@ export function DialogueSandbox({ projectId, chapterId, onClose, onInsertText }:
     .filter((warning, index, all) => all.indexOf(warning) === index) || []
 
   return (
-    <div className="h-full flex flex-col">
+    <div className="h-full bg-[var(--bg-primary)] flex flex-col">
       <div className="p-4 border-b border-gray-200 flex items-center justify-between">
         <div>
           <h3 className="font-semibold text-gray-900 flex items-center gap-2">
@@ -332,7 +341,7 @@ export function DialogueSandbox({ projectId, chapterId, onClose, onInsertText }:
                 </div>
               </div>
 
-              <div className="flex-1 overflow-y-auto p-3 space-y-3">
+              <div className="flex-1 overflow-auto p-4 bg-[var(--bg-secondary)]">
                 {selectedSession.messages.map((message) => (
                   <div
                     key={message.id || `${message.order}-${message.speaker}`}
@@ -422,6 +431,14 @@ export function DialogueSandbox({ projectId, chapterId, onClose, onInsertText }:
           )}
         </div>
       </div>
+
+      <DeleteConfirmModal
+        isOpen={deleteModal.isOpen}
+        onClose={() => setDeleteModal({ isOpen: false, session: null })}
+        onConfirm={handleConfirmDelete}
+        title={`确定要删除「${deleteModal.session?.title || ''}」吗？`}
+        message="删除后将无法恢复，请谨慎操作"
+      />
     </div>
   )
 }

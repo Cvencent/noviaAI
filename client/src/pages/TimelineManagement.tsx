@@ -15,6 +15,7 @@ import { Input } from '../components/ui/Input'
 import { Textarea } from '../components/ui/Textarea'
 import { Modal } from '../components/ui/Modal'
 import { Select } from '../components/ui/Select'
+import { DeleteConfirmModal } from '../components/DeleteConfirmModal'
 import {
   timelineApi,
   TimelineEvent,
@@ -22,10 +23,10 @@ import {
 } from '../api/timeline'
 
 const IMPORTANCE_OPTIONS = [
-  { value: 'MINOR', label: '次要', color: 'bg-gray-100 text-gray-600' },
-  { value: 'NORMAL', label: '一般', color: 'bg-blue-100 text-blue-700' },
-  { value: 'MAJOR', label: '重要', color: 'bg-orange-100 text-orange-700' },
-  { value: 'CRITICAL', label: '关键', color: 'bg-red-100 text-red-700' },
+  { value: 'MINOR', label: '次要', color: 'bg-gray-800 text-gray-400' },
+  { value: 'NORMAL', label: '一般', color: 'bg-blue-900/30 text-blue-400' },
+  { value: 'MAJOR', label: '重要', color: 'bg-orange-900/30 text-orange-400' },
+  { value: 'CRITICAL', label: '关键', color: 'bg-red-900/30 text-red-400' },
 ]
 
 export function TimelineManagement() {
@@ -93,13 +94,24 @@ export function TimelineManagement() {
     setIsModalOpen(true)
   }
 
-  const handleDelete = async (event: TimelineEvent) => {
-    if (!projectId || !confirm(`确定要删除事件「${event.title}」吗？`)) return
+  const [deleteModal, setDeleteModal] = useState({
+    isOpen: false,
+    event: null as TimelineEvent | null
+  })
+
+  const handleDelete = (event: TimelineEvent) => {
+    setDeleteModal({ isOpen: true, event })
+  }
+
+  const confirmDelete = async () => {
+    if (!projectId || !deleteModal.event) return
     try {
-      await timelineApi.delete(projectId, event.id)
+      await timelineApi.delete(projectId, deleteModal.event.id)
       await loadEvents()
     } catch (error) {
       console.error('删除失败:', error)
+    } finally {
+      setDeleteModal({ isOpen: false, event: null })
     }
   }
 
@@ -128,19 +140,19 @@ export function TimelineManagement() {
 
   if (isLoading) {
     return (
-      <div className="p-8 flex items-center justify-center">
-        <div className="text-gray-500">加载中...</div>
+      <div className="h-full bg-[var(--bg-primary)] p-4 flex items-center justify-center overflow-y-auto">
+        <div className="text-[var(--text-muted)]">加载中...</div>
       </div>
     )
   }
 
   return (
-    <div className="min-h-screen bg-gray-50 p-6">
+    <div className="h-full bg-[var(--bg-primary)] p-4 overflow-y-auto">
       <div className="max-w-4xl mx-auto">
         <div className="flex justify-between items-center mb-6">
           <div>
-            <h1 className="text-2xl font-bold text-gray-900">时间线管理</h1>
-            <p className="text-gray-600 mt-1">规划和管理故事世界的时间线事件</p>
+            <h1 className="text-2xl font-bold text-[var(--text-primary)]">时间线管理</h1>
+            <p className="text-[var(--text-muted)] mt-1">规划和管理故事世界的时间线事件</p>
           </div>
           <Button onClick={handleCreate}>
             <Plus className="w-4 h-4 mr-2" />
@@ -158,21 +170,21 @@ export function TimelineManagement() {
 
                 return (
                   <div key={event.id} className="relative pl-20 group">
-                    <div className="absolute left-5 top-4 w-6 h-6 rounded-full bg-white border-2 border-blue-500 flex items-center justify-center z-10">
-                      <span className="text-xs font-bold text-blue-600">{index + 1}</span>
+                    <div className="absolute left-5 top-4 w-6 h-6 rounded-full bg-[var(--bg-secondary)] border-2 border-[var(--accent-color)] flex items-center justify-center z-10">
+                      <span className="text-xs font-bold text-[var(--accent-color)]">{index + 1}</span>
                     </div>
 
                     <Card className="p-4 hover:shadow-md transition-shadow">
                       <div className="flex justify-between items-start">
                         <div className="flex-1">
                           <div className="flex items-center gap-3 mb-2">
-                            <h3 className="font-medium text-gray-900">{event.title}</h3>
+                            <h3 className="font-medium text-[var(--text-primary)]">{event.title}</h3>
                             <span className={`text-xs px-2 py-0.5 rounded ${importanceInfo.color}`}>
                               {importanceInfo.label}
                             </span>
                           </div>
 
-                          <div className="flex flex-wrap items-center gap-4 text-sm text-gray-500 mb-2">
+                          <div className="flex flex-wrap items-center gap-4 text-sm text-[var(--text-muted)] mb-2">
                             {event.timeLabel && (
                               <div className="flex items-center gap-1">
                                 <Clock className="w-3.5 h-3.5" />
@@ -322,6 +334,14 @@ export function TimelineManagement() {
           </Button>
         </div>
       </Modal>
+
+      <DeleteConfirmModal
+        isOpen={deleteModal.isOpen}
+        onClose={() => setDeleteModal({ isOpen: false, event: null })}
+        onConfirm={confirmDelete}
+        title={deleteModal.event?.title || '删除时间线事件'}
+        message={`确定要删除事件「${deleteModal.event?.title || ''}」吗？此操作无法撤销。`}
+      />
     </div>
   )
 }
