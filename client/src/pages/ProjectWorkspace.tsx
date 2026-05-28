@@ -463,7 +463,7 @@ export const ProjectWorkspace = ({ projectId: projectIdProp }: ProjectWorkspaceP
           minWidth={48}
           maxWidth={320}
         >
-          <nav className="p-3 space-y-1">
+          <nav className="p-3 space-y-1 h-full overflow-y-auto scrollbar-thin">
             {navItems.map(route => {
               const treeData = expandableNavData[route.path];
               const isExpanded = expandedNavFolders.has(route.path);
