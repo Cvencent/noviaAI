@@ -2,7 +2,7 @@ import { apiClient } from './client'
 import { ContentChange } from '@/types/ai-changes'
 
 export interface AssistantAction {
-  type: 'create_character' | 'create_relationship' | 'create_world_setting' | 'modify_chapter' | 'chat' | 'unknown'
+  type: 'create_character' | 'update_character' | 'delete_character' | 'create_relationship' | 'create_world_setting' | 'modify_chapter' | 'chat' | 'unknown'
   data: any
   response: string
 }

@@ -8,7 +8,6 @@ import {
   FileText, 
   ChevronDown,
   ChevronRight,
-  ChevronUp,
   GitBranch,
   Activity,
   Link2,
@@ -132,11 +131,9 @@ export const ProjectExplorer: React.FC<ProjectExplorerProps> = ({
           onClick={() => setShowProjectList(!showProjectList)}
           className="flex items-center gap-2 text-sm font-medium"
         >
-          {showProjectList ? (
-            <ChevronUp className="w-4 h-4" />
-          ) : (
+          <div className="transition-transform duration-300 ease-out" style={{ transform: showProjectList ? 'rotate(180deg)' : 'rotate(0deg)' }}>
             <ChevronDown className="w-4 h-4" />
-          )}
+          </div>
           <span>项目</span>
         </button>
         <div className="flex items-center gap-1">
@@ -155,7 +152,7 @@ export const ProjectExplorer: React.FC<ProjectExplorerProps> = ({
         </div>
       </div>
 
-      {showProjectList && (
+      <div className="overflow-hidden transition-all duration-300 ease-out" style={{ maxHeight: showProjectList ? '192px' : '0px', opacity: showProjectList ? 1 : 0 }}>
         <div className="border-b border-[var(--border-color)] max-h-48 overflow-y-auto">
           {isLoading ? (
             <div className="px-4 py-2 text-xs text-[var(--text-muted)]">加载中...</div>
@@ -189,7 +186,7 @@ export const ProjectExplorer: React.FC<ProjectExplorerProps> = ({
             </div>
           )}
         </div>
-      )}
+      </div>
       
       <div className="border-b border-[var(--border-color)]">
         <ConversationList
@@ -209,16 +206,14 @@ export const ProjectExplorer: React.FC<ProjectExplorerProps> = ({
                 onClick={() => toggleSection(section.label)}
                 className="w-full flex items-center gap-1.5 px-2 py-1.5 text-xs text-[var(--text-muted)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-tertiary)] transition-colors"
               >
-                {isExpanded ? (
-                  <ChevronDown className="w-3 h-3" />
-                ) : (
+                <div className="transition-transform duration-300 ease-out" style={{ transform: isExpanded ? 'rotate(90deg)' : 'rotate(0deg)' }}>
                   <ChevronRight className="w-3 h-3" />
-                )}
+                </div>
                 <Folder className="w-3.5 h-3.5" />
                 <span>{section.label}</span>
               </button>
               
-              {isExpanded && (
+              <div className="overflow-hidden transition-all duration-300 ease-out" style={{ maxHeight: isExpanded ? '240px' : '0px', opacity: isExpanded ? 1 : 0 }}>
                 <div className="ml-4">
                   {section.items.map((item) => {
                     const isActive = location.pathname === `/projects/${projectId}/${item.path}` ||
@@ -241,7 +236,7 @@ export const ProjectExplorer: React.FC<ProjectExplorerProps> = ({
                     )
                   })}
                 </div>
-              )}
+              </div>
             </div>
           )
         })}

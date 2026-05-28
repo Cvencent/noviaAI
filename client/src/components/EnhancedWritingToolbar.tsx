@@ -6,6 +6,7 @@ import { Card } from './ui/Card'
 import { Textarea } from './ui/Textarea'
 import { Select } from './ui/Select'
 import { enhancedWritingApi } from '../api/enhanced-writing'
+import { useToast } from '../contexts/ToastContext'
 
 type ToolType = 'showDontTell' | 'enhanceDescription' | 'rewrite' | 'brainstorm' | 'dialogue' | null
 
@@ -15,6 +16,7 @@ interface EnhancedWritingToolbarProps {
 }
 
 export function EnhancedWritingToolbar({ selectedText, onInsertText }: EnhancedWritingToolbarProps) {
+  const { warning: showWarningToast, error: showErrorToast, success: showSuccessToast } = useToast()
   const [activeTool, setActiveTool] = useState<ToolType>(null)
   const [isLoading, setIsLoading] = useState(false)
   const [result, setResult] = useState<any>(null)
@@ -61,7 +63,7 @@ export function EnhancedWritingToolbar({ selectedText, onInsertText }: EnhancedW
 
   const handleToolClick = (tool: ToolType) => {
     if (tool && tools.find(t => t.id === tool)?.hasSelection && !selectedText) {
-      alert('请先选择一段文字')
+      showWarningToast('请先选择一段文字')
       return
     }
     setActiveTool(tool)
@@ -76,7 +78,7 @@ export function EnhancedWritingToolbar({ selectedText, onInsertText }: EnhancedW
       setShowResult(true)
     } catch (error) {
       console.error('Show, Don\'t Tell 失败:', error)
-      alert('处理失败，请稍后重试')
+      showErrorToast('处理失败，请稍后重试')
     } finally {
       setIsLoading(false)
     }
@@ -95,7 +97,7 @@ export function EnhancedWritingToolbar({ selectedText, onInsertText }: EnhancedW
       setShowResult(true)
     } catch (error) {
       console.error('描写增强失败:', error)
-      alert('处理失败，请稍后重试')
+      showErrorToast('处理失败，请稍后重试')
     } finally {
       setIsLoading(false)
     }
@@ -113,7 +115,7 @@ export function EnhancedWritingToolbar({ selectedText, onInsertText }: EnhancedW
       setShowResult(true)
     } catch (error) {
       console.error('重写失败:', error)
-      alert('处理失败，请稍后重试')
+      showErrorToast('处理失败，请稍后重试')
     } finally {
       setIsLoading(false)
     }
@@ -131,7 +133,7 @@ export function EnhancedWritingToolbar({ selectedText, onInsertText }: EnhancedW
       setShowResult(true)
     } catch (error) {
       console.error('头脑风暴失败:', error)
-      alert('处理失败，请稍后重试')
+      showErrorToast('处理失败，请稍后重试')
     } finally {
       setIsLoading(false)
     }
@@ -149,7 +151,7 @@ export function EnhancedWritingToolbar({ selectedText, onInsertText }: EnhancedW
       setShowResult(true)
     } catch (error) {
       console.error('对话生成失败:', error)
-      alert('处理失败，请稍后重试')
+      showErrorToast('处理失败，请稍后重试')
     } finally {
       setIsLoading(false)
     }
@@ -157,6 +159,7 @@ export function EnhancedWritingToolbar({ selectedText, onInsertText }: EnhancedW
 
   const handleCopyResult = (text: string) => {
     navigator.clipboard.writeText(text)
+    showSuccessToast('已复制')
   }
 
   const handleUseResult = (text: string) => {

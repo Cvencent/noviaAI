@@ -4,13 +4,15 @@ import { cn } from '@/utils/cn';
 interface SkeletonProps extends React.HTMLAttributes<HTMLDivElement> {
   width?: string | number;
   height?: string | number;
+  variant?: 'default' | 'card' | 'text';
 }
 
-export const Skeleton = ({ className, width, height, style, ...props }: SkeletonProps) => {
+export const Skeleton = ({ className, width, height, variant = 'default', style, ...props }: SkeletonProps) => {
   return (
     <div
       className={cn(
-        'animate-pulse rounded-md bg-gray-200',
+        'relative overflow-hidden rounded-lg bg-[var(--bg-tertiary)]',
+        variant === 'text' && 'rounded',
         className
       )}
       style={{
@@ -19,7 +21,9 @@ export const Skeleton = ({ className, width, height, style, ...props }: Skeleton
         ...style,
       }}
       {...props}
-    />
+    >
+      <div className="absolute inset-0 -translate-x-full animate-shimmer bg-gradient-to-r from-transparent via-[var(--border-color)] to-transparent" />
+    </div>
   );
 };
 
@@ -29,8 +33,9 @@ export const SkeletonText = ({ className, lines = 3, ...props }: SkeletonProps &
       {Array.from({ length: lines }).map((_, i) => (
         <Skeleton
           key={i}
+          variant="text"
           height={16}
-          className={i === lines - 1 ? 'w-3/4' : 'w-full'}
+          className={cn(i === lines - 1 ? 'w-3/4' : 'w-full')}
         />
       ))}
     </div>
@@ -39,10 +44,31 @@ export const SkeletonText = ({ className, lines = 3, ...props }: SkeletonProps &
 
 export const SkeletonCard = ({ className, ...props }: SkeletonProps) => {
   return (
-    <div className={cn('bg-white rounded-xl border border-gray-200 shadow-sm p-6', className)} {...props}>
-      <Skeleton height={200} className="w-full mb-4" />
+    <div className={cn('bg-[var(--bg-secondary)] rounded-xl border border-[var(--border-color)] shadow-sm p-6', className)} {...props}>
+      <Skeleton height={200} className="w-full mb-4 rounded-xl" />
       <Skeleton height={24} className="w-3/4 mb-2" />
       <SkeletonText lines={2} />
     </div>
+  );
+};
+
+export const SkeletonAvatar = ({ className, size = 40, ...props }: SkeletonProps & { size?: number }) => {
+  return (
+    <Skeleton
+      width={size}
+      height={size}
+      className={cn('rounded-full', className)}
+      {...props}
+    />
+  );
+};
+
+export const SkeletonButton = ({ className, ...props }: SkeletonProps) => {
+  return (
+    <Skeleton
+      height={40}
+      className={cn('rounded-lg min-w-[100px]', className)}
+      {...props}
+    />
   );
 };

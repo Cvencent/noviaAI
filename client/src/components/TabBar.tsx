@@ -191,7 +191,7 @@ export const TabBar = ({
         </>
       )}
       
-      <div className="h-8 bg-[var(--bg-tertiary)] border-b border-[var(--border-color)] flex items-center">
+      <div className="h-8 glass border-b border-[var(--border-color)] flex items-center">
         {showScrollLeft && (
           <button
             onClick={() => scrollTabs('left')}
@@ -228,7 +228,8 @@ export const TabBar = ({
                     e.stopPropagation()
                     onTabClose(tab.id)
                   }}
-                  className="opacity-0 group-hover:opacity-100 hover:bg-[var(--bg-hover)] rounded p-0.5 transition-opacity"
+                  className="opacity-0 group-hover:opacity-100 hover:bg-[var(--bg-hover)] rounded p-1 transition-opacity"
+                  title="关闭"
                 >
                   <X className="w-3 h-3" />
                 </button>
@@ -266,7 +267,8 @@ export const TabBar = ({
                     e.stopPropagation()
                     onTabClose(tab.id)
                   }}
-                  className="opacity-0 group-hover:opacity-100 hover:bg-[var(--bg-hover)] rounded p-0.5 transition-opacity"
+                  className="opacity-0 group-hover:opacity-100 hover:bg-[var(--bg-hover)] rounded p-1 transition-opacity"
+                  title="关闭"
                 >
                   <X className="w-3 h-3" />
                 </button>
@@ -331,11 +333,12 @@ export const useTabManager = (maxTabs: number = 20) => {
 
   const closeTab = useCallback((tabId: string) => {
     setTabs(prev => {
+      const closedIndex = prev.findIndex(t => t.id === tabId)
       const newTabs = prev.filter(t => t.id !== tabId)
       
       if (activeTabId === tabId && newTabs.length > 0) {
-        const closedIndex = prev.findIndex(t => t.id === tabId)
-        const newActiveIndex = Math.min(closedIndex, newTabs.length - 1)
+        // 关闭活动 tab 时，优先激活左边的 tab，如果没有则激活右边的
+        const newActiveIndex = closedIndex > 0 ? closedIndex - 1 : 0
         setActiveTabId(newTabs[newActiveIndex]?.id || null)
       }
       

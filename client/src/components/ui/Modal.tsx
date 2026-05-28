@@ -1,4 +1,5 @@
 import React, { useEffect } from 'react';
+import { createPortal } from 'react-dom';
 import { X } from 'lucide-react';
 import { cn } from '@/utils/cn';
 
@@ -29,25 +30,26 @@ export const Modal = ({ isOpen, onClose, title, children, size = 'md', footer }:
 
   if (!isOpen) return null;
 
-  return (
+  return createPortal(
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
       <div className="fixed inset-0 bg-black/70 backdrop-blur-sm" onClick={onClose} />
       <div className={cn(
-        'relative rounded-xl shadow-2xl w-full animate-in fade-in zoom-in-95 duration-200',
+        'relative rounded-xl shadow-2xl w-full max-h-[85vh] flex flex-col animate-in fade-in zoom-in-95 duration-200',
         'bg-[var(--bg-secondary)] border border-[var(--border-color)]',
         sizes[size]
       )}>
-        <div className={cn('flex items-center justify-between px-6 py-4 border-b', 'border-[var(--border-color)]')}>
+        <div className={cn('flex items-center justify-between px-6 py-4 border-b shrink-0', 'border-[var(--border-color)]')}>
           {title && <h2 className="text-lg font-semibold text-[var(--text-primary)]">{title}</h2>}
           <button onClick={onClose} className={cn('p-1 rounded-lg transition-colors', 'hover:bg-[var(--bg-hover)]')}>
             <X className="w-5 h-5 text-[var(--text-muted)]" />
           </button>
         </div>
-        <div className="px-6 py-4 max-h-[70vh] overflow-y-auto text-[var(--text-primary)]">
+        <div className="px-6 py-4 flex-1 min-h-0 overflow-y-auto text-[var(--text-primary)] scrollbar-thin">
           {children}
         </div>
-        {footer && <div className={cn('px-6 py-4 border-t', 'border-[var(--border-color)]')}>{footer}</div>}
+        {footer && <div className={cn('px-6 py-4 border-t shrink-0', 'border-[var(--border-color)]')}>{footer}</div>}
       </div>
-    </div>
+    </div>,
+    document.body
   );
 };

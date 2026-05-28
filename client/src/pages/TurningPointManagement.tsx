@@ -10,6 +10,7 @@ import {
   Heart,
   Target,
   Flame,
+  Sparkles,
 } from 'lucide-react'
 import { Button } from '../components/ui/Button'
 import { Card } from '../components/ui/Card'
@@ -22,6 +23,7 @@ import {
   TurningPoint,
   CreateTurningPointDto,
 } from '../api/turning-points'
+import { buildAiGenerationPrompt } from '../utils/aiGenerationPrompts'
 
 const TURNING_POINT_TYPES = [
   { value: 'INCITING_INCIDENT', label: '激励事件', color: 'bg-blue-900/30 text-blue-400', icon: Zap },
@@ -32,7 +34,11 @@ const TURNING_POINT_TYPES = [
   { value: 'MIDPOINT_REVERSAL', label: '中点反转', color: 'bg-yellow-900/30 text-yellow-400', icon: Target },
 ]
 
-export function TurningPointManagement() {
+interface TurningPointManagementProps {
+  onAskAI?: (prompt: string) => void
+}
+
+export function TurningPointManagement({ onAskAI }: TurningPointManagementProps = {}) {
   const { projectId } = useParams<{ projectId: string }>()
 
   const [turningPoints, setTurningPoints] = useState<TurningPoint[]>([])
@@ -155,10 +161,16 @@ export function TurningPointManagement() {
             <h1 className="text-2xl font-bold text-[var(--text-primary)]">转折点管理</h1>
             <p className="text-[var(--text-muted)] mt-1">标记和管理故事中的关键转折点</p>
           </div>
-          <Button onClick={handleCreate}>
+          <div className="flex items-center gap-2">
+            <Button variant="outline" onClick={() => onAskAI?.(buildAiGenerationPrompt('turning-points'))}>
+              <Sparkles className="w-4 h-4 mr-2" />
+              AI 生成
+            </Button>
+            <Button onClick={handleCreate}>
             <Plus className="w-4 h-4 mr-2" />
             添加转折点
-          </Button>
+            </Button>
+          </div>
         </div>
 
         {turningPoints.length > 0 ? (

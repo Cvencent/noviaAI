@@ -25,6 +25,29 @@ const ROLE_CONFIG: Record<string, { label: string; color: string }> = {
   minor: { label: '龙套', color: 'bg-gray-500/20 text-gray-400' },
 };
 
+const ROLE_KEY_MAP: Record<string, string> = {
+  '主角': 'protagonist',
+  '反派': 'antagonist',
+  '配角': 'supporting',
+  '龙套': 'minor',
+  '导师': 'protagonist',
+  '恋人': 'supporting',
+  '好友': 'supporting',
+  '对手': 'antagonist',
+  deuteragonist: 'protagonist',
+  mentor: 'protagonist',
+  love_interest: 'supporting',
+  friend: 'supporting',
+  rival: 'antagonist',
+  other: 'supporting',
+};
+
+const normalizeRole = (role?: string): string => {
+  if (!role) return 'supporting';
+  const lower = role.toLowerCase();
+  return ROLE_KEY_MAP[role] || ROLE_KEY_MAP[lower] || lower;
+};
+
 export const CharacterManagement: React.FC = () => {
   const { projectId } = useParams<{ projectId: string }>();
   const [characters, setCharacters] = useState<Character[]>([]);
@@ -51,6 +74,18 @@ export const CharacterManagement: React.FC = () => {
     fetchCharacters();
   }, [projectId]);
 
+  // Listen for character changes from AI assistant
+  useEffect(() => {
+    const handler = (e: Event) => {
+      const detail = (e as CustomEvent).detail;
+      if (detail?.actionType && (detail.actionType === 'CREATE_CHARACTER' || detail.actionType === 'UPDATE_CHARACTER' || detail.actionType === 'DELETE_CHARACTER')) {
+        fetchCharacters();
+      }
+    };
+    window.addEventListener('projectTreeChanged', handler);
+    return () => window.removeEventListener('projectTreeChanged', handler);
+  }, [projectId]);
+
   const fetchCharacters = async () => {
     if (!projectId) return;
     setIsLoading(true);
@@ -67,7 +102,7 @@ export const CharacterManagement: React.FC = () => {
   const handleCreate = async () => {
     if (!projectId || !formData.name.trim()) return;
     try {
-      await charactersApi.create(projectId, formData);
+      await charactersApi.create(projectId, { ...formData, role: formData.role.toUpperCase() });
       showToast({ message: '角色创建成功', type: 'success' });
       setShowCreateModal(false);
       resetForm();
@@ -80,7 +115,7 @@ export const CharacterManagement: React.FC = () => {
   const handleUpdate = async () => {
     if (!projectId || !editingCharacter) return;
     try {
-      await charactersApi.update(projectId, editingCharacter.id, formData);
+      await charactersApi.update(projectId, editingCharacter.id, { ...formData, role: formData.role.toUpperCase() });
       showToast({ message: '角色更新成功', type: 'success' });
       setEditingCharacter(null);
       resetForm();
@@ -125,7 +160,7 @@ export const CharacterManagement: React.FC = () => {
     setEditingCharacter(character);
     setFormData({
       name: character.name,
-      role: character.role || 'supporting',
+      role: normalizeRole(character.role),
       appearance: character.appearance || '',
       personality: character.personality || '',
       background: character.background || '',
@@ -204,10 +239,10 @@ export const CharacterManagement: React.FC = () => {
                       {character.role && (
                         <span
                           className={`text-xs px-2 py-0.5 rounded-full ${
-                            ROLE_CONFIG[character.role]?.color || 'bg-gray-500/20 text-gray-400'
+                            ROLE_CONFIG[normalizeRole(character.role)]?.color || 'bg-gray-500/20 text-gray-400'
                           }`}
                         >
-                          {ROLE_CONFIG[character.role]?.label || character.role}
+                          {ROLE_CONFIG[normalizeRole(character.role)]?.label || character.role}
                         </span>
                       )}
                     </div>
@@ -262,8 +297,9 @@ export const CharacterManagement: React.FC = () => {
           resetForm();
         }}
         title={editingCharacter ? '编辑角色' : '新建角色'}
+        size="lg"
       >
-        <div className="space-y-4 max-h-[70vh] overflow-y-auto pr-2">
+        <div className="space-y-5">
           <div className="grid grid-cols-2 gap-4">
             <div>
               <label className="block text-sm font-medium text-[var(--text-secondary)] mb-1">
@@ -282,7 +318,7 @@ export const CharacterManagement: React.FC = () => {
               <select
                 value={formData.role}
                 onChange={(e) => setFormData({ ...formData, role: e.target.value })}
-                className="w-full px-3 py-2 bg-[var(--bg-tertiary)] border border-[var(--border-color)] rounded-lg text-[var(--text-primary)] focus:outline-none focus:border-[var(--accent-color)]"
+                className="w-full px-3 py-2.5 bg-[var(--bg-tertiary)] border border-[var(--border-color)] rounded-lg text-sm text-[var(--text-primary)] focus:outline-none focus:border-[var(--accent-color)] focus:ring-2 focus:ring-[var(--accent-color)]/20 transition-all appearance-none cursor-pointer"
               >
                 <option value="protagonist">主角</option>
                 <option value="antagonist">反派</option>
@@ -341,7 +377,7 @@ export const CharacterManagement: React.FC = () => {
               />
             </div>
             <div>
-              <label className="block text-sm font-medium text-gray-300 mb-1">
+              <label className="block text-sm font-medium text-[var(--text-secondary)] mb-1">
                 缺陷弱点
               </label>
               <Textarea

@@ -9,6 +9,7 @@ import {
   FileText,
   GripVertical,
   Plus,
+  Sparkles,
   Trash2,
 } from 'lucide-react';
 import { Button } from '../components/ui/Button';
@@ -16,6 +17,7 @@ import { Card } from '../components/ui/Card';
 import { Input } from '../components/ui/Input';
 import { Modal } from '../components/ui/Modal';
 import { chaptersApi, type Chapter } from '../api/chapters';
+import { buildAiGenerationPrompt } from '../utils/aiGenerationPrompts';
 
 const STATUS_CONFIG = {
   DRAFT: { label: '草稿', icon: Clock, color: 'text-yellow-400 bg-yellow-900/30' },
@@ -30,7 +32,8 @@ const STATUS_CONFIG = {
 
 export const ChapterManagement: React.FC<{
   onOpenRoute?: (path: string) => void;
-}> = ({ onOpenRoute }) => {
+  onAskAI?: (prompt: string) => void;
+}> = ({ onOpenRoute, onAskAI }) => {
   const { projectId } = useParams<{ projectId: string }>();
   const navigate = useNavigate();
   const [chapters, setChapters] = useState<Chapter[]>([]);
@@ -123,10 +126,16 @@ export const ChapterManagement: React.FC<{
             <h1 className="text-2xl font-bold text-[var(--text-primary)]">章节管理</h1>
             <p className="text-[var(--text-muted)] mt-1">管理项目章节</p>
           </div>
-          <Button onClick={() => setShowCreateModal(true)}>
+          <div className="flex items-center gap-2">
+            <Button variant="outline" onClick={() => onAskAI?.(buildAiGenerationPrompt('chapters'))}>
+              <Sparkles className="w-4 h-4 mr-2" />
+              AI 生成
+            </Button>
+            <Button onClick={() => setShowCreateModal(true)}>
             <Plus className="w-4 h-4 mr-2" />
             新建章节
-          </Button>
+            </Button>
+          </div>
         </div>
 
         <Card className="bg-[var(--bg-secondary)] border-[var(--border-color)]">

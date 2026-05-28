@@ -32,6 +32,21 @@ export interface Message {
   actionCards?: ActionSuggestion[]
 }
 
+export interface StreamState {
+  status: 'RUNNING' | 'COMPLETED' | 'FAILED'
+  requestMessageId?: string
+  request?: {
+    message: string
+    provider?: string
+    chapterId?: string
+    chapterContent?: string
+    chapterTitle?: string
+    conversationHistory?: Array<{ role: 'user' | 'assistant'; content: string }>
+  }
+  error?: string
+  updatedAt?: string
+}
+
 export interface ChoiceCard {
   id: string
   title: string
@@ -39,4 +54,11 @@ export interface ChoiceCard {
   content?: any
   actionType: string
   selectedAt?: string
+}
+
+export interface ConversationFocusTarget {
+  conversationId: string
+  messageId: string
+  cardId?: string
+  nonce: number
 }

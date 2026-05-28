@@ -61,6 +61,10 @@ export class UsageLogsService {
         cost: createUsageLogDto.cost,
         ipAddress: createUsageLogDto.ipAddress,
         userAgent: createUsageLogDto.userAgent,
+        model: createUsageLogDto.model,
+        promptTokens: createUsageLogDto.promptTokens,
+        completionTokens: createUsageLogDto.responseTokens,
+        duration: createUsageLogDto.duration,
       },
       include: {
         apiKey: {
@@ -187,6 +191,7 @@ export class UsageLogsService {
         select: {
           tokensUsed: true,
           cost: true,
+         model: true,
         },
       }),
     ])
@@ -204,7 +209,7 @@ export class UsageLogsService {
     const dailyMap = new Map<string, { count: number; tokens: number; cost: number }>()
 
     for (const log of recentLogs) {
-      const model = (log.requestBody as any)?.model || log.endpoint
+      const model = log.model || (log.requestBody as any)?.model || log.endpoint
       const dateKey = log.createdAt.toISOString().split('T')[0]
 
       const modelStats = byModelMap.get(model) || { count: 0, tokens: 0, cost: 0 }
@@ -278,5 +283,46 @@ export class UsageLogsService {
     }
 
     return log
+  }
+
+  async getRetentionSetting(userId: string) {
+    let setting = await this.prisma.logRetentionSetting.findUnique({
+      where: { userId },
+    })
+    if (!setting) {
+      setting = await this.prisma.logRetentionSetting.create({
+        data: { userId, retentionDays: 30 },
+      })
+    }
+    return setting
+  }
+
+  async updateRetentionSetting(userId: string, retentionDays: number) {
+    return this.prisma.logRetentionSetting.upsert({
+      where: { userId },
+      update: { retentionDays },
+      create: { userId, retentionDays },
+    })
+  }
+
+  async cleanupExpiredLogs(userId: string) {
+    const setting = await this.getRetentionSetting(userId)
+    const cutoffDate = new Date()
+    cutoffDate.setDate(cutoffDate.getDate() - setting.retentionDays)
+
+    const apiKeys = await this.prisma.apiKey.findMany({
+      where: { userId },
+      select: { id: true },
+    })
+    const apiKeyIds = apiKeys.map(k => k.id)
+
+    const result = await this.prisma.usageLog.deleteMany({
+      where: {
+        apiKeyId: { in: apiKeyIds },
+        createdAt: { lt: cutoffDate },
+      },
+    })
+
+    return { deleted: result.count, retentionDays: setting.retentionDays }
   }
 }

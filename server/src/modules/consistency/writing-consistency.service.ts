@@ -705,6 +705,7 @@ export class WritingConsistencyService {
     const labels: Record<string, string> = {
       first_person: '第一人称',
       third_person_limited: '第三人称有限视角',
+      third_limited: '第三人称有限视角',
       third_person_omniscient: '第三人称全知视角',
     }
     return labels[p] || p
@@ -717,6 +718,7 @@ export class WritingConsistencyService {
       melancholic: '忧郁感伤',
       romantic: '浪漫温馨',
       action_oriented: '紧张刺激',
+      neutral: '中性',
     }
     return labels[t] || t
   }
@@ -735,6 +737,7 @@ export class WritingConsistencyService {
       simple: '简单易懂',
       intermediate: '中等难度',
       advanced: '文学性强',
+      literary: '文学性强',
     }
     return labels[l] || l
   }
@@ -743,6 +746,7 @@ export class WritingConsistencyService {
     const labels: Record<string, string> = {
       short: '短句为主',
       mixed: '长短句结合',
+      varied: '长短句结合',
       complex: '复合句为主',
     }
     return labels[s] || s

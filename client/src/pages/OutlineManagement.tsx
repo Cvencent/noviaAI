@@ -19,6 +19,8 @@ import { Textarea } from '../components/ui/Textarea'
 import { Modal } from '../components/ui/Modal'
 import { Select } from '../components/ui/Select'
 import { DeleteConfirmModal } from '../components/DeleteConfirmModal'
+import { useToast } from '../contexts/ToastContext'
+import { buildAiGenerationPrompt } from '../utils/aiGenerationPrompts'
 import {
   outlinesApi,
   Outline,
@@ -84,11 +86,13 @@ const OUTLINE_STATUS_OPTIONS = [
 interface OutlineManagementProps {
   projectId?: string
   outlineId?: string
+  onAskAI?: (prompt: string) => void
 }
 
-export function OutlineManagement({ projectId: projectIdProp, outlineId: outlineIdProp }: OutlineManagementProps = {}) {
+export function OutlineManagement({ projectId: projectIdProp, outlineId: outlineIdProp, onAskAI }: OutlineManagementProps = {}) {
   const { projectId: routeProjectId, outlineId: routeOutlineId } = useParams<{ projectId: string; outlineId?: string }>()
   const projectId = projectIdProp || routeProjectId
+  const { error: showErrorToast } = useToast()
 
   const [selectedOutline, setSelectedOutline] = useState<Outline | null>(null)
   const [isOutlineModalOpen, setIsOutlineModalOpen] = useState(false)
@@ -222,7 +226,7 @@ export function OutlineManagement({ projectId: projectIdProp, outlineId: outline
       setIsAiModalOpen(false)
     } catch (error) {
       console.error('AI 生成大纲失败:', error)
-      alert('AI 生成大纲失败，请检查 AI 设置或稍后重试')
+      showErrorToast('AI 生成大纲失败，请检查 AI 设置或稍后重试')
     } finally {
       setIsGeneratingOutline(false)
     }
@@ -237,7 +241,7 @@ export function OutlineManagement({ projectId: projectIdProp, outlineId: outline
       setStructureReport(report)
     } catch (error) {
       console.error('结构分析失败:', error)
-      alert('结构分析失败，请稍后重试')
+      showErrorToast('结构分析失败，请稍后重试')
     } finally {
       setIsAnalyzingStructure(false)
     }
@@ -539,7 +543,7 @@ export function OutlineManagement({ projectId: projectIdProp, outlineId: outline
             )}
             <Button
               variant="outline"
-              onClick={() => setIsAiModalOpen(true)}
+              onClick={() => onAskAI ? onAskAI(buildAiGenerationPrompt('outlines')) : setIsAiModalOpen(true)}
               isLoading={isOutlineAiJobRunning}
               size="sm"
               className="border-[var(--accent-color)] text-[var(--accent-color)] hover:bg-[var(--accent-color)]/10"

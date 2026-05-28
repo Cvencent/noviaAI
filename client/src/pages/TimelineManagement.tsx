@@ -8,6 +8,7 @@ import {
   MapPin,
   Users,
   Clock,
+  Sparkles,
 } from 'lucide-react'
 import { Button } from '../components/ui/Button'
 import { Card } from '../components/ui/Card'
@@ -21,6 +22,7 @@ import {
   TimelineEvent,
   CreateTimelineEventDto,
 } from '../api/timeline'
+import { buildAiGenerationPrompt } from '../utils/aiGenerationPrompts'
 
 const IMPORTANCE_OPTIONS = [
   { value: 'MINOR', label: '次要', color: 'bg-gray-800 text-gray-400' },
@@ -29,7 +31,11 @@ const IMPORTANCE_OPTIONS = [
   { value: 'CRITICAL', label: '关键', color: 'bg-red-900/30 text-red-400' },
 ]
 
-export function TimelineManagement() {
+interface TimelineManagementProps {
+  onAskAI?: (prompt: string) => void
+}
+
+export function TimelineManagement({ onAskAI }: TimelineManagementProps = {}) {
   const { projectId } = useParams<{ projectId: string }>()
 
   const [events, setEvents] = useState<TimelineEvent[]>([])
@@ -154,10 +160,16 @@ export function TimelineManagement() {
             <h1 className="text-2xl font-bold text-[var(--text-primary)]">时间线管理</h1>
             <p className="text-[var(--text-muted)] mt-1">规划和管理故事世界的时间线事件</p>
           </div>
-          <Button onClick={handleCreate}>
+          <div className="flex items-center gap-2">
+            <Button variant="outline" onClick={() => onAskAI?.(buildAiGenerationPrompt('timeline'))}>
+              <Sparkles className="w-4 h-4 mr-2" />
+              AI 生成
+            </Button>
+            <Button onClick={handleCreate}>
             <Plus className="w-4 h-4 mr-2" />
             添加事件
-          </Button>
+            </Button>
+          </div>
         </div>
 
         {events.length > 0 ? (

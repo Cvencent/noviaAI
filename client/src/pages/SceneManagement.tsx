@@ -12,6 +12,7 @@ import {
   List,
   ChevronRight,
   Film,
+  Sparkles,
 } from 'lucide-react'
 import { Button } from '../components/ui/Button'
 import { Card } from '../components/ui/Card'
@@ -21,6 +22,7 @@ import { Modal } from '../components/ui/Modal'
 import { DeleteConfirmModal } from '../components/DeleteConfirmModal'
 import { scenesApi } from '../api/scenes'
 import type { Scene } from '../api/scenes'
+import { buildAiGenerationPrompt } from '../utils/aiGenerationPrompts'
 
 interface SceneFormData {
   title: string
@@ -31,7 +33,11 @@ interface SceneFormData {
   content: string
 }
 
-export function SceneManagement() {
+interface SceneManagementProps {
+  onAskAI?: (prompt: string) => void
+}
+
+export function SceneManagement({ onAskAI }: SceneManagementProps = {}) {
   const { projectId } = useParams<{ projectId: string }>()
 
   const [scenes, setScenes] = useState<Scene[]>([])
@@ -176,10 +182,16 @@ export function SceneManagement() {
             <h1 className="text-2xl font-bold text-[var(--text-primary)]">场景管理</h1>
             <p className="text-sm text-[var(--text-muted)] mt-1">规划故事中的每个关键时刻</p>
           </div>
-          <Button onClick={handleCreate} className="bg-gradient-to-r from-indigo-600 to-purple-600 hover:from-indigo-700 hover:to-purple-700">
+          <div className="flex items-center gap-2">
+            <Button variant="outline" onClick={() => onAskAI?.(buildAiGenerationPrompt('scenes'))}>
+              <Sparkles className="w-4 h-4 mr-2" />
+              AI 生成
+            </Button>
+            <Button onClick={handleCreate} className="bg-gradient-to-r from-indigo-600 to-purple-600 hover:from-indigo-700 hover:to-purple-700">
             <Plus className="w-4 h-4 mr-2" />
             创建场景
-          </Button>
+            </Button>
+          </div>
         </div>
 
         <div className="flex gap-4 mb-6 items-center">

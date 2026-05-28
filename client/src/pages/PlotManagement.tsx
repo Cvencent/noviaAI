@@ -7,6 +7,7 @@ import {
   GitBranch,
   Clock,
   GripVertical,
+  Sparkles,
 } from 'lucide-react'
 import { Button } from '../components/ui/Button'
 import { Card } from '../components/ui/Card'
@@ -16,6 +17,7 @@ import { Modal } from '../components/ui/Modal'
 import { Select } from '../components/ui/Select'
 import { DeleteConfirmModal } from '../components/DeleteConfirmModal'
 import { plotsApi, Plot, PlotPoint, CreatePlotDto, CreatePlotPointDto } from '../api/plots'
+import { buildAiGenerationPrompt } from '../utils/aiGenerationPrompts'
 
 const PLOT_POINT_TYPES = [
   { value: 'exposition', label: '开端', color: 'bg-blue-900/30 text-blue-400' },
@@ -32,7 +34,11 @@ const PLOT_STATUS_OPTIONS = [
   { value: 'ABANDONED', label: '已放弃' },
 ]
 
-export function PlotManagement() {
+interface PlotManagementProps {
+  onAskAI?: (prompt: string) => void
+}
+
+export function PlotManagement({ onAskAI }: PlotManagementProps = {}) {
   const { projectId } = useParams<{ projectId: string }>()
 
   const [plots, setPlots] = useState<Plot[]>([])
@@ -239,10 +245,16 @@ export function PlotManagement() {
             <h1 className="text-2xl font-bold text-[var(--text-primary)]">情节线管理</h1>
             <p className="text-[var(--text-muted)] mt-1">规划和管理故事的情节发展线</p>
           </div>
-          <Button onClick={handleCreatePlot}>
+          <div className="flex items-center gap-2">
+            <Button variant="outline" onClick={() => onAskAI?.(buildAiGenerationPrompt('plots'))}>
+              <Sparkles className="w-4 h-4 mr-2" />
+              AI 生成
+            </Button>
+            <Button onClick={handleCreatePlot}>
             <Plus className="w-4 h-4 mr-2" />
             创建情节线
-          </Button>
+            </Button>
+          </div>
         </div>
 
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">

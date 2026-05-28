@@ -147,7 +147,7 @@ export const ConversationList: React.FC<ConversationListProps> = ({
         </div>
       </div>
 
-      <div className="flex-1 overflow-y-auto">
+      <div className="flex-1 overflow-y-auto scrollbar-thin">
         {isLoading ? (
           <div className="flex items-center justify-center h-full p-4">
             <Loader2 className="w-4 h-4 text-[var(--text-muted)] animate-spin" />

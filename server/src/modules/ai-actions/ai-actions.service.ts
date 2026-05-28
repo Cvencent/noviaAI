@@ -5,10 +5,10 @@ import { CreateWorldSettingDto, UpdateWorldSettingDto } from '../world-settings/
 import { CreateChapterDto, UpdateChapterDto } from '../chapters/dto'
 import { CreatePlotDto, UpdatePlotDto } from '../plots/dto'
 import { CreateOutlineDto, UpdateOutlineDto } from '../outlines/dto'
-import { CreateSceneDto } from '../scenes/dto'
-import { CreateTimelineEventDto } from '../timeline/dto'
-import { CreateTurningPointDto } from '../turning-points/dto'
-import { CreateChekhovsGunDto } from '../chekhovs-guns/dto'
+import { CreateSceneDto, UpdateSceneDto } from '../scenes/dto'
+import { CreateTimelineEventDto, UpdateTimelineEventDto } from '../timeline/dto'
+import { CreateTurningPointDto, UpdateTurningPointDto } from '../turning-points/dto'
+import { CreateChekhovsGunDto, UpdateChekhovsGunDto } from '../chekhovs-guns/dto'
 import { AIActionType } from './dto/ai-action.dto'
 
 interface ActionParams {
@@ -34,6 +34,10 @@ export class AIActionsService {
       case AIActionType.UPDATE_CHARACTER:
         result = await this.updateCharacter(actionParams as any)
         message = '角色更新成功'
+        break
+      case AIActionType.BULK_UPDATE_CHARACTERS:
+        result = await this.bulkUpdateCharacters(actionParams as any)
+        message = `Updated ${result.updatedCount} characters`
         break
       case AIActionType.DELETE_CHARACTER:
         result = await this.deleteCharacter(actionParams as any)
@@ -67,29 +71,81 @@ export class AIActionsService {
         result = await this.deleteChapter(actionParams as any)
         message = '章节删除成功'
         break
+      case AIActionType.DELETE_ALL_CHAPTERS:
+        result = await this.deleteAllChapters(actionParams as any)
+        message = `已清空 ${result.deletedCount} 个章节`
+        break
       case AIActionType.CREATE_PLOT:
         result = await this.createPlot(actionParams as any)
         message = '剧情线创建成功'
+        break
+      case AIActionType.UPDATE_PLOT:
+        result = await this.updatePlot(actionParams as any)
+        message = '剧情线更新成功'
+        break
+      case AIActionType.DELETE_PLOT:
+        result = await this.deletePlot(actionParams as any)
+        message = '剧情线删除成功'
         break
       case AIActionType.CREATE_OUTLINE:
         result = await this.createOutline(actionParams as any)
         message = '大纲创建成功'
         break
+      case AIActionType.UPDATE_OUTLINE:
+        result = await this.updateOutline(actionParams as any)
+        message = '大纲更新成功'
+        break
+      case AIActionType.DELETE_OUTLINE:
+        result = await this.deleteOutline(actionParams as any)
+        message = '大纲删除成功'
+        break
       case AIActionType.CREATE_SCENE:
         result = await this.createScene(actionParams as any)
         message = '场景创建成功'
+        break
+      case AIActionType.UPDATE_SCENE:
+        result = await this.updateScene(actionParams as any)
+        message = '场景更新成功'
+        break
+      case AIActionType.DELETE_SCENE:
+        result = await this.deleteScene(actionParams as any)
+        message = '场景删除成功'
         break
       case AIActionType.CREATE_TIMELINE_EVENT:
         result = await this.createTimelineEvent(actionParams as any)
         message = '时间线事件创建成功'
         break
+      case AIActionType.UPDATE_TIMELINE_EVENT:
+        result = await this.updateTimelineEvent(actionParams as any)
+        message = '时间线事件更新成功'
+        break
+      case AIActionType.DELETE_TIMELINE_EVENT:
+        result = await this.deleteTimelineEvent(actionParams as any)
+        message = '时间线事件删除成功'
+        break
       case AIActionType.CREATE_TURNING_POINT:
         result = await this.createTurningPoint(actionParams as any)
         message = '转折点创建成功'
         break
+      case AIActionType.UPDATE_TURNING_POINT:
+        result = await this.updateTurningPoint(actionParams as any)
+        message = '转折点更新成功'
+        break
+      case AIActionType.DELETE_TURNING_POINT:
+        result = await this.deleteTurningPoint(actionParams as any)
+        message = '转折点删除成功'
+        break
       case AIActionType.CREATE_CHEKHOVS_GUN:
         result = await this.createChekhovsGun(actionParams as any)
         message = '伏笔创建成功'
+        break
+      case AIActionType.UPDATE_CHEKHOVS_GUN:
+        result = await this.updateChekhovsGun(actionParams as any)
+        message = '伏笔更新成功'
+        break
+      case AIActionType.DELETE_CHEKHOVS_GUN:
+        result = await this.deleteChekhovsGun(actionParams as any)
+        message = '伏笔删除成功'
         break
       default:
         throw new BadRequestException(`未知的操作类型: ${actionType}`)
@@ -134,6 +190,8 @@ export class AIActionsService {
       },
     })
 
+    await this.syncStoryEntity(params.projectId, params.characterData.name, 'CHARACTER', params.characterData)
+
     return character
   }
 
@@ -163,6 +221,25 @@ export class AIActionsService {
     })
 
     return updatedCharacter
+  }
+
+  async bulkUpdateCharacters(params: {
+    projectId: string
+    userId: string
+    characterData: UpdateCharacterDto
+  }) {
+    await this.verifyProjectAccess(params.projectId, params.userId)
+
+    if (!params.characterData || Object.keys(params.characterData).length === 0) {
+      throw new BadRequestException('Character update data cannot be empty')
+    }
+
+    const result = await this.prisma.character.updateMany({
+      where: { projectId: params.projectId },
+      data: params.characterData,
+    })
+
+    return { updatedCount: result.count }
   }
 
   async deleteCharacter(params: {
@@ -291,6 +368,8 @@ export class AIActionsService {
         items: true,
       },
     })
+
+    await this.syncStoryEntity(params.projectId, params.worldSettingData.name, 'CONCEPT', params.worldSettingData)
 
     return worldSetting
   }
@@ -463,24 +542,50 @@ export class AIActionsService {
     return { id: params.chapterId, deleted: true }
   }
 
+  async deleteAllChapters(params: {
+    projectId: string
+    userId: string
+  }) {
+    await this.verifyProjectAccess(params.projectId, params.userId)
+
+    const result = await this.prisma.chapter.deleteMany({
+      where: { projectId: params.projectId },
+    })
+
+    return { deletedCount: result.count }
+  }
+
   async createPlot(params: {
     projectId: string
     userId: string
     plotData: CreatePlotDto
+    title?: string
+    description?: string
+    status?: string
+    plotPoints?: any[]
   }) {
     const project = await this.verifyProjectAccess(params.projectId, params.userId)
+    const plotData = params.plotData || {
+      title: params.title,
+      description: params.description,
+      status: params.status,
+      plotPoints: params.plotPoints,
+    } as any
     
-    if (!params.plotData || !params.plotData.title) {
+    if (!plotData || !plotData.title) {
       throw new BadRequestException('剧情线标题不能为空')
     }
 
+    const plotPoints = Array.isArray((plotData as any).plotPoints) ? (plotData as any).plotPoints : undefined
     const plot = await this.prisma.plot.create({
       data: {
-        ...params.plotData,
+        title: plotData.title,
+        description: plotData.description,
+        status: plotData.status || 'ACTIVE',
         projectId: params.projectId,
-        plotPoints: (params.plotData as any).plotPoints
+        plotPoints: plotPoints
           ? {
-              create: (params.plotData as any).plotPoints.map((point: any, index: number) => ({
+              create: plotPoints.map((point: any, index: number) => ({
                 title: point.title,
                 type: point.type || 'EVENT',
                 description: point.description,
@@ -496,7 +601,72 @@ export class AIActionsService {
       },
     })
 
+    await this.syncStoryEntity(params.projectId, plotData.title, 'EVENT', plotData)
+
     return plot
+  }
+
+  async updatePlot(params: {
+    projectId: string
+    userId: string
+    plotId: string
+    plotData: UpdatePlotDto
+  }) {
+    await this.verifyProjectAccess(params.projectId, params.userId)
+
+    const plot = await this.prisma.plot.findUnique({
+      where: { id: params.plotId },
+    })
+
+    if (!plot) {
+      throw new NotFoundException('剧情线不存在')
+    }
+
+    if (plot.projectId !== params.projectId) {
+      throw new ForbiddenException('没有权限修改此剧情线')
+    }
+
+    const updatedPlot = await this.prisma.plot.update({
+      where: { id: params.plotId },
+      data: params.plotData,
+      include: {
+        plotPoints: {
+          orderBy: { order: 'asc' },
+        },
+      },
+    })
+
+    if (params.plotData?.title) {
+      await this.syncStoryEntity(params.projectId, params.plotData.title, 'EVENT', params.plotData)
+    }
+
+    return updatedPlot
+  }
+
+  async deletePlot(params: {
+    projectId: string
+    userId: string
+    plotId: string
+  }) {
+    await this.verifyProjectAccess(params.projectId, params.userId)
+
+    const plot = await this.prisma.plot.findUnique({
+      where: { id: params.plotId },
+    })
+
+    if (!plot) {
+      throw new NotFoundException('剧情线不存在')
+    }
+
+    if (plot.projectId !== params.projectId) {
+      throw new ForbiddenException('没有权限删除此剧情线')
+    }
+
+    await this.prisma.plot.delete({
+      where: { id: params.plotId },
+    })
+
+    return { id: params.plotId, deleted: true }
   }
 
   async createOutline(params: {
@@ -522,7 +692,72 @@ export class AIActionsService {
       },
     })
 
+    await this.syncStoryEntity(params.projectId, params.outlineData.title, 'CONCEPT', params.outlineData)
+
     return outline
+  }
+
+  async updateOutline(params: {
+    projectId: string
+    userId: string
+    outlineId: string
+    outlineData: UpdateOutlineDto
+  }) {
+    await this.verifyProjectAccess(params.projectId, params.userId)
+
+    const outline = await this.prisma.outline.findUnique({
+      where: { id: params.outlineId },
+    })
+
+    if (!outline) {
+      throw new NotFoundException('大纲不存在')
+    }
+
+    if (outline.projectId !== params.projectId) {
+      throw new ForbiddenException('没有权限修改此大纲')
+    }
+
+    const updatedOutline = await this.prisma.outline.update({
+      where: { id: params.outlineId },
+      data: params.outlineData,
+      include: {
+        items: {
+          orderBy: { order: 'asc' },
+        },
+      },
+    })
+
+    if (params.outlineData?.title) {
+      await this.syncStoryEntity(params.projectId, params.outlineData.title, 'CONCEPT', params.outlineData)
+    }
+
+    return updatedOutline
+  }
+
+  async deleteOutline(params: {
+    projectId: string
+    userId: string
+    outlineId: string
+  }) {
+    await this.verifyProjectAccess(params.projectId, params.userId)
+
+    const outline = await this.prisma.outline.findUnique({
+      where: { id: params.outlineId },
+    })
+
+    if (!outline) {
+      throw new NotFoundException('大纲不存在')
+    }
+
+    if (outline.projectId !== params.projectId) {
+      throw new ForbiddenException('没有权限删除此大纲')
+    }
+
+    await this.prisma.outline.delete({
+      where: { id: params.outlineId },
+    })
+
+    return { id: params.outlineId, deleted: true }
   }
 
   async createScene(params: {
@@ -542,7 +777,7 @@ export class AIActionsService {
     })
     const order = params.sceneData.order ?? (lastScene ? lastScene.order + 1 : 0)
 
-    return this.prisma.scene.create({
+    const scene = await this.prisma.scene.create({
       data: {
         title: params.sceneData.title,
         summary: params.sceneData.summary,
@@ -554,6 +789,68 @@ export class AIActionsService {
         project: { connect: { id: params.projectId } },
       },
     })
+
+    await this.syncStoryEntity(params.projectId, params.sceneData.title, 'EVENT', params.sceneData)
+
+    return scene
+  }
+
+  async updateScene(params: {
+    projectId: string
+    userId: string
+    sceneId: string
+    sceneData: UpdateSceneDto
+  }) {
+    await this.verifyProjectAccess(params.projectId, params.userId)
+
+    const scene = await this.prisma.scene.findUnique({
+      where: { id: params.sceneId },
+    })
+
+    if (!scene) {
+      throw new NotFoundException('场景不存在')
+    }
+
+    if (scene.projectId !== params.projectId) {
+      throw new ForbiddenException('没有权限修改此场景')
+    }
+
+    const updatedScene = await this.prisma.scene.update({
+      where: { id: params.sceneId },
+      data: params.sceneData,
+    })
+
+    if (params.sceneData?.title) {
+      await this.syncStoryEntity(params.projectId, params.sceneData.title, 'EVENT', params.sceneData)
+    }
+
+    return updatedScene
+  }
+
+  async deleteScene(params: {
+    projectId: string
+    userId: string
+    sceneId: string
+  }) {
+    await this.verifyProjectAccess(params.projectId, params.userId)
+
+    const scene = await this.prisma.scene.findUnique({
+      where: { id: params.sceneId },
+    })
+
+    if (!scene) {
+      throw new NotFoundException('场景不存在')
+    }
+
+    if (scene.projectId !== params.projectId) {
+      throw new ForbiddenException('没有权限删除此场景')
+    }
+
+    await this.prisma.scene.delete({
+      where: { id: params.sceneId },
+    })
+
+    return { id: params.sceneId, deleted: true }
   }
 
   async createTimelineEvent(params: {
@@ -573,13 +870,75 @@ export class AIActionsService {
     })
     const order = params.timelineEventData.order ?? (lastEvent ? lastEvent.order + 1 : 0)
 
-    return this.prisma.timelineEvent.create({
+    const timelineEvent = await this.prisma.timelineEvent.create({
       data: {
         ...params.timelineEventData,
         order,
         projectId: params.projectId,
       },
     })
+
+    await this.syncStoryEntity(params.projectId, params.timelineEventData.title, 'EVENT', params.timelineEventData)
+
+    return timelineEvent
+  }
+
+  async updateTimelineEvent(params: {
+    projectId: string
+    userId: string
+    timelineEventId: string
+    timelineEventData: UpdateTimelineEventDto
+  }) {
+    await this.verifyProjectAccess(params.projectId, params.userId)
+
+    const timelineEvent = await this.prisma.timelineEvent.findUnique({
+      where: { id: params.timelineEventId },
+    })
+
+    if (!timelineEvent) {
+      throw new NotFoundException('时间线事件不存在')
+    }
+
+    if (timelineEvent.projectId !== params.projectId) {
+      throw new ForbiddenException('没有权限修改此时间线事件')
+    }
+
+    const updatedTimelineEvent = await this.prisma.timelineEvent.update({
+      where: { id: params.timelineEventId },
+      data: params.timelineEventData,
+    })
+
+    if (params.timelineEventData?.title) {
+      await this.syncStoryEntity(params.projectId, params.timelineEventData.title, 'EVENT', params.timelineEventData)
+    }
+
+    return updatedTimelineEvent
+  }
+
+  async deleteTimelineEvent(params: {
+    projectId: string
+    userId: string
+    timelineEventId: string
+  }) {
+    await this.verifyProjectAccess(params.projectId, params.userId)
+
+    const timelineEvent = await this.prisma.timelineEvent.findUnique({
+      where: { id: params.timelineEventId },
+    })
+
+    if (!timelineEvent) {
+      throw new NotFoundException('时间线事件不存在')
+    }
+
+    if (timelineEvent.projectId !== params.projectId) {
+      throw new ForbiddenException('没有权限删除此时间线事件')
+    }
+
+    await this.prisma.timelineEvent.delete({
+      where: { id: params.timelineEventId },
+    })
+
+    return { id: params.timelineEventId, deleted: true }
   }
 
   async createTurningPoint(params: {
@@ -599,13 +958,75 @@ export class AIActionsService {
     })
     const order = params.turningPointData.order ?? (lastTurningPoint ? lastTurningPoint.order + 1 : 0)
 
-    return this.prisma.turningPoint.create({
+    const turningPoint = await this.prisma.turningPoint.create({
       data: {
         ...params.turningPointData,
         order,
         projectId: params.projectId,
       },
     })
+
+    await this.syncStoryEntity(params.projectId, params.turningPointData.title, 'EVENT', params.turningPointData)
+
+    return turningPoint
+  }
+
+  async updateTurningPoint(params: {
+    projectId: string
+    userId: string
+    turningPointId: string
+    turningPointData: UpdateTurningPointDto
+  }) {
+    await this.verifyProjectAccess(params.projectId, params.userId)
+
+    const turningPoint = await this.prisma.turningPoint.findUnique({
+      where: { id: params.turningPointId },
+    })
+
+    if (!turningPoint) {
+      throw new NotFoundException('转折点不存在')
+    }
+
+    if (turningPoint.projectId !== params.projectId) {
+      throw new ForbiddenException('没有权限修改此转折点')
+    }
+
+    const updatedTurningPoint = await this.prisma.turningPoint.update({
+      where: { id: params.turningPointId },
+      data: params.turningPointData,
+    })
+
+    if (params.turningPointData?.title) {
+      await this.syncStoryEntity(params.projectId, params.turningPointData.title, 'EVENT', params.turningPointData)
+    }
+
+    return updatedTurningPoint
+  }
+
+  async deleteTurningPoint(params: {
+    projectId: string
+    userId: string
+    turningPointId: string
+  }) {
+    await this.verifyProjectAccess(params.projectId, params.userId)
+
+    const turningPoint = await this.prisma.turningPoint.findUnique({
+      where: { id: params.turningPointId },
+    })
+
+    if (!turningPoint) {
+      throw new NotFoundException('转折点不存在')
+    }
+
+    if (turningPoint.projectId !== params.projectId) {
+      throw new ForbiddenException('没有权限删除此转折点')
+    }
+
+    await this.prisma.turningPoint.delete({
+      where: { id: params.turningPointId },
+    })
+
+    return { id: params.turningPointId, deleted: true }
   }
 
   async createChekhovsGun(params: {
@@ -619,7 +1040,7 @@ export class AIActionsService {
       throw new BadRequestException('伏笔名称、描述和铺设文本不能为空')
     }
 
-    return this.prisma.chekhovsGun.create({
+    const chekhovsGun = await this.prisma.chekhovsGun.create({
       data: {
         ...params.chekhovsGunData,
         projectId: params.projectId,
@@ -629,6 +1050,72 @@ export class AIActionsService {
         payoffChapter: true,
       },
     })
+
+    await this.syncStoryEntity(params.projectId, params.chekhovsGunData.name, 'CONCEPT', params.chekhovsGunData)
+
+    return chekhovsGun
+  }
+
+  async updateChekhovsGun(params: {
+    projectId: string
+    userId: string
+    chekhovsGunId: string
+    chekhovsGunData: UpdateChekhovsGunDto
+  }) {
+    await this.verifyProjectAccess(params.projectId, params.userId)
+
+    const chekhovsGun = await this.prisma.chekhovsGun.findUnique({
+      where: { id: params.chekhovsGunId },
+    })
+
+    if (!chekhovsGun) {
+      throw new NotFoundException('伏笔不存在')
+    }
+
+    if (chekhovsGun.projectId !== params.projectId) {
+      throw new ForbiddenException('没有权限修改此伏笔')
+    }
+
+    const updatedChekhovsGun = await this.prisma.chekhovsGun.update({
+      where: { id: params.chekhovsGunId },
+      data: params.chekhovsGunData,
+      include: {
+        setupChapter: true,
+        payoffChapter: true,
+      },
+    })
+
+    if (params.chekhovsGunData?.name) {
+      await this.syncStoryEntity(params.projectId, params.chekhovsGunData.name, 'CONCEPT', params.chekhovsGunData)
+    }
+
+    return updatedChekhovsGun
+  }
+
+  async deleteChekhovsGun(params: {
+    projectId: string
+    userId: string
+    chekhovsGunId: string
+  }) {
+    await this.verifyProjectAccess(params.projectId, params.userId)
+
+    const chekhovsGun = await this.prisma.chekhovsGun.findUnique({
+      where: { id: params.chekhovsGunId },
+    })
+
+    if (!chekhovsGun) {
+      throw new NotFoundException('伏笔不存在')
+    }
+
+    if (chekhovsGun.projectId !== params.projectId) {
+      throw new ForbiddenException('没有权限删除此伏笔')
+    }
+
+    await this.prisma.chekhovsGun.delete({
+      where: { id: params.chekhovsGunId },
+    })
+
+    return { id: params.chekhovsGunId, deleted: true }
   }
 
   async analyzeAndSuggestActions(params: {
@@ -911,6 +1398,35 @@ export class AIActionsService {
       worldSettings,
       plots,
       outlines,
+    }
+  }
+
+  private async syncStoryEntity(projectId: string, name: string | undefined, type: string, payload: unknown) {
+    const normalizedName = name?.trim()
+    if (!normalizedName || !this.prisma.storyEntity?.upsert) return
+
+    try {
+      const serializedPayload = JSON.stringify(payload || {})
+      await this.prisma.storyEntity.upsert({
+        where: {
+          projectId_name: {
+            projectId,
+            name: normalizedName,
+          },
+        },
+        create: {
+          projectId,
+          name: normalizedName,
+          type,
+          payload: serializedPayload,
+        },
+        update: {
+          type,
+          payload: serializedPayload,
+        },
+      })
+    } catch {
+      // Story Graph sync should not block the user-facing creation action.
     }
   }
 }

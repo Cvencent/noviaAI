@@ -32,6 +32,30 @@ export class CreateUsageLogDto {
 
   @IsOptional()
   @IsString()
+  model?: string
+
+  @IsOptional()
+  @IsString()
+  promptContent?: string
+
+  @IsOptional()
+  @IsString()
+  responseContent?: string
+
+  @IsOptional()
+  @IsNumber()
+  promptTokens?: number
+
+  @IsOptional()
+  @IsNumber()
+  responseTokens?: number
+
+  @IsOptional()
+  @IsNumber()
+  duration?: number
+
+  @IsOptional()
+  @IsString()
   ipAddress?: string
 
   @IsOptional()

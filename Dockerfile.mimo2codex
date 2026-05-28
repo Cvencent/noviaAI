@@ -1,0 +1,24 @@
+# mimo2codex Dockerfile
+# 将 mimo2codex 容器化，启用服务模式
+# 构建：docker build -f Dockerfile.mimo2codex -t mimo2codex .
+# 运行：docker run -d -p 8788:8788 -v mimo2codex-data:/root/.mimo2codex -e MIMO_API_KEY=tp-xxx mimo2codex
+
+FROM node:18-alpine
+
+# 安装 mimo2codex
+RUN npm install -g mimo2codex
+
+# 创建数据目录
+RUN mkdir -p /root/.mimo2codex
+
+# 暴露端口
+EXPOSE 8788
+
+# 环境变量（可在运行时覆盖）
+ENV MIMO2CODEX_HOST=0.0.0.0
+ENV MIMO2CODEX_AUTH=on
+# 其他环境变量可在运行时通过 -e 参数设置，例如：
+# MIMO_API_KEY, DS_API_KEY, GENERIC_BASE_URL, GENERIC_API_KEY, GENERIC_DEFAULT_MODEL
+
+# 启动命令
+CMD ["mimo2codex"]

@@ -8,6 +8,7 @@ import { Textarea } from '@/components/ui/Textarea';
 import { Select } from '@/components/ui/Select';
 import { Modal } from '@/components/ui/Modal';
 import { projectsApi } from '@/api/projects';
+import { useToast } from '@/contexts/ToastContext';
 import type { CreateProjectDto } from '@/types/project';
 
 interface CreateProjectModalProps {
@@ -20,6 +21,7 @@ type CreateMode = 'manual' | 'ai';
 export const CreateProjectModal: React.FC<CreateProjectModalProps> = ({ isOpen, onClose }) => {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
+  const { error: showErrorToast } = useToast();
   const [createMode, setCreateMode] = useState<CreateMode>('manual');
   const [aiDescription, setAiDescription] = useState('');
 
@@ -41,7 +43,7 @@ export const CreateProjectModal: React.FC<CreateProjectModalProps> = ({ isOpen, 
       navigate(`/projects/${project.id}`);
     },
     onError: () => {
-      alert('创建项目失败，请稍后重试');
+      showErrorToast('创建项目失败，请稍后重试');
     },
   });
 
@@ -54,7 +56,7 @@ export const CreateProjectModal: React.FC<CreateProjectModalProps> = ({ isOpen, 
       navigate(`/projects/${project.id}`);
     },
     onError: () => {
-      alert('AI生成项目失败，请检查API Key配置或稍后重试');
+      showErrorToast('AI 生成项目失败，请检查 API Key 配置或稍后重试');
     },
   });
 

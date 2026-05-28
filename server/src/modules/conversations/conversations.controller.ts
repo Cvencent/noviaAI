@@ -1,6 +1,6 @@
 import { Controller, Get, Post, Put, Patch, Delete, Body, Param, UseGuards } from '@nestjs/common'
 import { ConversationsService } from './conversations.service'
-import { CreateConversationDto, CreateMessageDto, UpdateMessageCardsDto } from './dto'
+import { CreateAssistantStreamDto, CreateConversationDto, CreateMessageDto, UpdateAssistantStreamDto, UpdateMessageCardsDto } from './dto'
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard'
 
 @Controller('projects/:projectId/conversations')
@@ -16,6 +16,11 @@ export class ConversationsController {
   @Get()
   async findAll(@Param('projectId') projectId: string) {
     return this.conversationsService.findAll(projectId)
+  }
+
+  @Get('cards/all')
+  async getAllCards(@Param('projectId') projectId: string) {
+    return this.conversationsService.getAllCards(projectId)
   }
 
   @Get(':id')
@@ -55,5 +60,24 @@ export class ConversationsController {
     @Body() updateMessageCardsDto: UpdateMessageCardsDto,
   ) {
     return this.conversationsService.updateMessageCards(projectId, conversationId, messageId, updateMessageCardsDto)
+  }
+
+  @Post(':id/assistant-streams')
+  async createAssistantStream(
+    @Param('projectId') projectId: string,
+    @Param('id') conversationId: string,
+    @Body() createAssistantStreamDto: CreateAssistantStreamDto,
+  ) {
+    return this.conversationsService.createAssistantStreamMessage(projectId, conversationId, createAssistantStreamDto)
+  }
+
+  @Patch(':id/assistant-streams/:messageId')
+  async updateAssistantStream(
+    @Param('projectId') projectId: string,
+    @Param('id') conversationId: string,
+    @Param('messageId') messageId: string,
+    @Body() updateAssistantStreamDto: UpdateAssistantStreamDto,
+  ) {
+    return this.conversationsService.updateAssistantStreamMessage(projectId, conversationId, messageId, updateAssistantStreamDto)
   }
 }

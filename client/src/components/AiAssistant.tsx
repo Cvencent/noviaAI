@@ -15,7 +15,7 @@ import { outlinesApi } from '@/api/outlines'
 import { aiActionsApi } from '@/api/ai-actions'
 import { cn } from '@/utils/cn'
 import { useAuthStore } from '@/store/auth'
-import type { ChoiceCard, Conversation } from '@/types/conversation'
+import type { ChoiceCard, Conversation, ConversationFocusTarget, StreamState } from '@/types/conversation'
 import type { ContentChange } from '@/types/ai-changes'
 
 interface Message {
@@ -27,6 +27,7 @@ interface Message {
   actions?: AssistantAction[]
   modificationData?: ChapterModificationData
   cards?: ChoiceCard[]
+  streamState?: StreamState
 }
 
 const parseStoredCards = (cardsJson: unknown): ChoiceCard[] | undefined => {
@@ -41,14 +42,55 @@ const parseStoredCards = (cardsJson: unknown): ChoiceCard[] | undefined => {
   }
 }
 
-const toLocalMessage = (message: NonNullable<Conversation['messages']>[number]): Message => ({
-  id: message.id,
-  conversationId: message.conversationId,
-  role: message.role === 'assistant' ? 'assistant' : 'user',
-  content: message.content,
-  timestamp: new Date(message.timestamp),
-  cards: parseStoredCards(message.cardsJson),
-})
+const parseStoredActions = (actionsJson: unknown): StoredActionsPayload => {
+  if (!actionsJson) return {}
+  if (typeof actionsJson !== 'string') return {}
+  try {
+    const parsed = JSON.parse(actionsJson)
+    if (Array.isArray(parsed)) return { actions: parsed as AssistantAction[] }
+    if (parsed && typeof parsed === 'object') {
+      return {
+        __stream: parsed.__stream,
+        actions: Array.isArray(parsed.actions) ? parsed.actions : undefined,
+      }
+    }
+  } catch {
+    return {}
+  }
+  return {}
+}
+
+const buildStoredActionsJson = (stream: StreamState, actions: AssistantAction[] = []) =>
+  JSON.stringify({
+    __stream: stream,
+    actions,
+  })
+
+const buildFinalActionsJson = (actions: AssistantAction[]) =>
+  JSON.stringify({
+    actions,
+  })
+
+const toLocalMessage = (message: NonNullable<Conversation['messages']>[number]): Message => {
+  const storedActions = parseStoredActions(message.actionsJson)
+  return {
+    id: message.id,
+    conversationId: message.conversationId,
+    role: message.role === 'assistant' ? 'assistant' : 'user',
+    content: message.content,
+    timestamp: new Date(message.timestamp),
+    actions: storedActions.actions,
+    cards: parseStoredCards(message.cardsJson),
+    streamState: storedActions.__stream,
+  }
+}
+
+const getMessageStreamState = (message?: NonNullable<Conversation['messages']>[number] | Message): StreamState | undefined => {
+  if (!message) return undefined
+  if ('streamState' in message) return message.streamState
+  if ('actionsJson' in message) return parseStoredActions(message.actionsJson).__stream
+  return undefined
+}
 
 const getSelectedCardIds = (messages: Message[]) =>
   new Set(
@@ -139,23 +181,52 @@ const getActionTargetQueryKey = (actionType: string) => {
     case 'CREATE_CHAPTER':
     case 'UPDATE_CHAPTER':
     case 'DELETE_CHAPTER':
+    case 'DELETE_ALL_CHAPTERS':
       return 'chapters'
     case 'CREATE_PLOT':
+    case 'UPDATE_PLOT':
+    case 'DELETE_PLOT':
       return 'plots'
     case 'CREATE_OUTLINE':
+    case 'UPDATE_OUTLINE':
+    case 'DELETE_OUTLINE':
       return 'outlines'
     case 'CREATE_SCENE':
+    case 'UPDATE_SCENE':
+    case 'DELETE_SCENE':
       return 'scenes'
     case 'CREATE_TIMELINE_EVENT':
+    case 'UPDATE_TIMELINE_EVENT':
+    case 'DELETE_TIMELINE_EVENT':
       return 'timeline'
     case 'CREATE_TURNING_POINT':
+    case 'UPDATE_TURNING_POINT':
+    case 'DELETE_TURNING_POINT':
       return 'turning-points'
     case 'CREATE_CHEKHOVS_GUN':
+    case 'UPDATE_CHEKHOVS_GUN':
+    case 'DELETE_CHEKHOVS_GUN':
       return 'chekhovs-guns'
     default:
       return undefined
   }
 }
+
+interface StoredActionsPayload {
+  __stream?: StreamState
+  actions?: AssistantAction[]
+}
+
+const LEGACY_ACTION_TO_AI_ACTION: Record<string, string> = {
+  create_character: 'CREATE_CHARACTER',
+  update_character: 'UPDATE_CHARACTER',
+  delete_character: 'DELETE_CHARACTER',
+  create_relationship: 'ADD_RELATIONSHIP',
+  create_world_setting: 'CREATE_WORLD_SETTING',
+}
+
+const getLegacyActionTargetQueryKey = (actionType: string) =>
+  getActionTargetQueryKey(LEGACY_ACTION_TO_AI_ACTION[actionType] || actionType)
 
 const createNextStepCards = (request: string, response: string, hasChapterContext: boolean): ChoiceCard[] => {
   if (!response.trim()) return []
@@ -309,8 +380,12 @@ export const AiAssistant: React.FC<{
   onOpenAISettings?: () => void
   onOpenRoute?: (path: string) => void
   conversationId?: string
+  focusTarget?: ConversationFocusTarget
   onConversationCreated?: (conversationId: string) => void
-}> = ({ projectId, chapterId, chapterContent, chapterTitle, onApplyChanges, onOpenAISettings, onOpenRoute, conversationId, onConversationCreated }) => {
+  pendingPrompt?: string
+  autoSubmit?: boolean
+  onPendingPromptUsed?: () => void
+}> = ({ projectId, chapterId, chapterContent, chapterTitle, onApplyChanges, onOpenAISettings, onOpenRoute, conversationId, focusTarget, onConversationCreated, pendingPrompt, autoSubmit, onPendingPromptUsed }) => {
   const navigate = useNavigate()
   const [input, setInput] = useState('')
   const [messages, setMessages] = useState<Message[]>([])
@@ -321,7 +396,12 @@ export const AiAssistant: React.FC<{
   const [selectedCardIds, setSelectedCardIds] = useState<Set<string>>(new Set())
   const [runningCardId, setRunningCardId] = useState<string | null>(null)
   const messagesEndRef = useRef<HTMLDivElement>(null)
+  const messageRefs = useRef<Record<string, HTMLDivElement | null>>({})
+  const cardRefs = useRef<Record<string, HTMLDivElement | null>>({})
   const inputRef = useRef<HTMLTextAreaElement>(null)
+  const skipNextScrollRef = useRef(false)
+  const resumedStreamIdsRef = useRef<Set<string>>(new Set())
+  const [highlightedFocus, setHighlightedFocus] = useState<{ messageId: string; cardId?: string } | null>(null)
   const queryClient = useQueryClient()
 
   const { data: apiKeys, isLoading: isLoadingApiKeys } = useQuery({
@@ -390,7 +470,7 @@ export const AiAssistant: React.FC<{
   // 当对话切换时加载已保存消息
   useEffect(() => {
     setPendingModification(undefined)
-    setStreamingThinking('')
+    setStreamingThinking('正在连接 AI，准备分析你的请求...')
     setStreamingContent('')
 
     if (conversationId) {
@@ -408,6 +488,45 @@ export const AiAssistant: React.FC<{
     setMessages([])
     setSelectedCardIds(new Set())
   }, [activeConversation, conversationId, projectId])
+
+  useEffect(() => {
+    if (!projectId || !conversationId || !activeConversation?.messages?.length || isLoading) return
+
+    const lastMessage = activeConversation.messages[activeConversation.messages.length - 1]
+    const streamState = getMessageStreamState(lastMessage)
+    if (
+      lastMessage.role !== 'assistant' ||
+      streamState?.status !== 'RUNNING' ||
+      resumedStreamIdsRef.current.has(lastMessage.id)
+    ) {
+      return
+    }
+
+    resumedStreamIdsRef.current.add(lastMessage.id)
+    setIsLoading(true)
+    setStreamingThinking('正在继续上次中断的回复...')
+    setStreamingContent(lastMessage.content || '')
+    setMessages(prev => prev.filter(message => message.id !== lastMessage.id))
+
+    runAssistantStream({
+      activeConversationId: conversationId,
+      assistantMessageId: lastMessage.id,
+      streamState,
+      initialContent: lastMessage.content || '',
+    }).catch((error) => {
+      console.error('续传对话失败:', error)
+      const message = error instanceof Error ? error.message : '未知错误'
+      setMessages(prev => [...prev, {
+        id: Date.now().toString(),
+        conversationId,
+        role: 'assistant',
+        content: `抱歉，续传回复失败：${message}`,
+        timestamp: new Date(),
+      }])
+    }).finally(() => {
+      setIsLoading(false)
+    })
+  }, [activeConversation, conversationId, projectId, isLoading])
 
   // 当没有消息时显示欢迎消息
   useEffect(() => {
@@ -437,9 +556,63 @@ export const AiAssistant: React.FC<{
     conversationId,
   ])
 
+  // 处理从卡片库传递过来的提示词
   useEffect(() => {
+    if (pendingPrompt) {
+      if (autoSubmit) {
+        // 自动发送：直接调用 handleSend 并传入 prompt
+        onPendingPromptUsed?.()
+        handleSend(pendingPrompt)
+      } else {
+        // 仅填入输入框
+        setInput(pendingPrompt)
+        onPendingPromptUsed?.()
+        requestAnimationFrame(() => inputRef.current?.focus())
+      }
+    }
+  }, [pendingPrompt, autoSubmit, onPendingPromptUsed])
+
+  useEffect(() => {
+    if (focusTarget?.conversationId === conversationId) {
+      return
+    }
+    if (skipNextScrollRef.current) {
+      skipNextScrollRef.current = false
+      return
+    }
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
-  }, [messages, streamingContent])
+  }, [messages, streamingContent, focusTarget, conversationId])
+
+  useEffect(() => {
+    if (!focusTarget || focusTarget.conversationId !== conversationId) return
+
+    const targetElement = focusTarget.cardId
+      ? cardRefs.current[`${focusTarget.messageId}:${focusTarget.cardId}`]
+      : messageRefs.current[focusTarget.messageId]
+    const fallbackElement = messageRefs.current[focusTarget.messageId]
+    const element = targetElement || fallbackElement
+
+    if (!element) return
+
+    skipNextScrollRef.current = true
+    window.setTimeout(() => {
+      element.scrollIntoView({ behavior: 'smooth', block: 'center' })
+      setHighlightedFocus({
+        messageId: focusTarget.messageId,
+        cardId: focusTarget.cardId,
+      })
+    }, 0)
+
+    const timer = window.setTimeout(() => {
+      setHighlightedFocus(current => (
+        current?.messageId === focusTarget.messageId && current?.cardId === focusTarget.cardId
+          ? null
+          : current
+      ))
+    }, 1800)
+
+    return () => window.clearTimeout(timer)
+  }, [focusTarget, conversationId, messages])
 
   const appendAssistantMessage = async (
     content: string,
@@ -495,10 +668,226 @@ export const AiAssistant: React.FC<{
     appendAssistantMessage('已取消修改。', conversationId, { persist: Boolean(conversationId) })
   }
 
-  const handleSend = async () => {
-    if (!input.trim() || !projectId || isLoading) return
+  const persistAssistantDraft = async (
+    activeConversationId: string,
+    assistantMessageId: string,
+    streamState: StreamState,
+    content: string,
+    status: 'RUNNING' | 'COMPLETED' | 'FAILED',
+    actions: AssistantAction[] = [],
+    cards: ChoiceCard[] = [],
+    error?: string,
+  ) => {
+    const nextStreamState: StreamState = {
+      ...streamState,
+      status,
+      error,
+      updatedAt: new Date().toISOString(),
+    }
 
-    const messageText = input.trim()
+    await conversationsApi.updateAssistantStream(projectId, activeConversationId, assistantMessageId, {
+      content,
+      status,
+      actionsJson: status === 'COMPLETED'
+        ? (actions.length > 0 ? buildFinalActionsJson(actions) : undefined)
+        : buildStoredActionsJson(nextStreamState, actions),
+      cardsJson: cards.length > 0 ? JSON.stringify(cards) : undefined,
+      error,
+    })
+
+    return nextStreamState
+  }
+
+  const runAssistantStream = async (options: {
+    activeConversationId: string
+    assistantMessageId: string
+    streamState: StreamState
+    initialContent?: string
+  }) => {
+    const { activeConversationId, assistantMessageId, streamState } = options
+    const request = streamState.request
+    if (!request?.message) {
+      throw new Error('缺少可续传的请求信息')
+    }
+
+    const token = useAuthStore.getState().token
+    const resumePrefix = options.initialContent?.trim()
+    const streamMessage = resumePrefix
+      ? `${request.message}\n\n上一次回复已中断，以下是已经生成并保存的内容，请不要重复这部分内容，从中断处自然继续完成：\n${resumePrefix}`
+      : request.message
+    const response = await fetch(`${API_BASE_URL}/ai-assistant/chat-stream`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      },
+      body: JSON.stringify({
+        projectId,
+        message: streamMessage,
+        provider: request.provider,
+        conversationHistory: request.conversationHistory || [],
+        chapterId: request.chapterId,
+        chapterContent: request.chapterContent,
+        chapterTitle: request.chapterTitle,
+      }),
+    })
+
+    if (!response.ok) {
+      throw new Error(`请求失败（${response.status}）`)
+    }
+
+    const reader = response.body?.getReader()
+    if (!reader) {
+      throw new Error('无法读取响应')
+    }
+
+    const decoder = new TextDecoder('utf-8')
+    let thinkingContent = ''
+    let content = options.initialContent || ''
+    let buffer = ''
+    let actions: AssistantAction[] = []
+    let actionCards: ChoiceCard[] = []
+    let modificationData: ChapterModificationData | undefined = undefined
+    let streamError: Error | null = null
+    let lastPersistAt = 0
+
+    setStreamingContent(content)
+
+    const persistRunning = async (force = false) => {
+      const now = Date.now()
+      if (!force && now - lastPersistAt < 1200) return
+      lastPersistAt = now
+      await persistAssistantDraft(activeConversationId, assistantMessageId, streamState, content, 'RUNNING', actions)
+    }
+
+    const handleStreamLine = (line: string) => {
+      const trimmed = line.trim()
+      if (!trimmed.startsWith('data: ')) return
+
+      const payload = trimmed.substring(6).trim()
+      if (!payload || payload === '[DONE]') return
+
+      try {
+        const data = JSON.parse(payload)
+
+        if (data.error) {
+          streamError = new Error(data.error)
+          return
+        }
+
+        if (data.type === 'thinking') {
+          thinkingContent = data.content || ''
+          setStreamingThinking(thinkingContent)
+        } else if (data.type === 'content') {
+          content += data.content || ''
+          setStreamingContent(content)
+        } else if (data.type === 'action' && data.action) {
+          actions.push(data.action)
+        } else if (data.type === 'action_cards' && Array.isArray(data.cards)) {
+          actionCards = data.cards
+        } else if (data.type === 'modification') {
+          modificationData = data.data
+        } else if (data.type === 'done') {
+          actions = data.actions || actions
+          const modifyAction = actions.find(action => action.type === 'modify_chapter')
+          if (modifyAction?.data) {
+            modificationData = modifyAction.data
+          }
+        }
+      } catch (e) {
+        console.error('解析错误:', e)
+      }
+    }
+
+    while (true) {
+      const { done, value } = await reader.read()
+      if (done) break
+
+      buffer += decoder.decode(value, { stream: true })
+      const lines = buffer.split('\n')
+      buffer = lines.pop() || ''
+
+      for (const line of lines) {
+        handleStreamLine(line)
+      }
+
+      await persistRunning()
+      if (streamError) break
+    }
+
+    if (buffer.trim()) {
+      handleStreamLine(buffer)
+    }
+
+    if (streamError) {
+      const error = streamError as Error
+      await persistAssistantDraft(activeConversationId, assistantMessageId, streamState, content, 'FAILED', actions, [], error.message)
+      throw error
+    }
+
+    setStreamingThinking('正在连接 AI，准备分析你的请求...')
+    setStreamingContent('')
+
+    const outlineCard = createOutlineCard(request.message, content)
+    const nextStepCards = createNextStepCards(request.message, content, Boolean(request.chapterId))
+    const cards = [outlineCard, ...actionCards, ...nextStepCards].filter((card): card is ChoiceCard => Boolean(card))
+
+    const savedAssistantMessage = await conversationsApi.updateAssistantStream(
+      projectId,
+      activeConversationId,
+      assistantMessageId,
+      {
+        content,
+        status: 'COMPLETED',
+        actionsJson: actions.length > 0 ? buildFinalActionsJson(actions) : undefined,
+        cardsJson: cards.length > 0 ? JSON.stringify(cards) : undefined,
+      },
+    )
+
+    const assistantMessage: Message = {
+      id: savedAssistantMessage.id,
+      conversationId: savedAssistantMessage.conversationId,
+      role: 'assistant',
+      content,
+      timestamp: new Date(savedAssistantMessage.timestamp),
+      actions: actions.length > 0 ? actions : undefined,
+      modificationData,
+      cards: cards.length > 0 ? cards : undefined,
+    }
+
+    setMessages(prev => {
+      const exists = prev.some(message => message.id === assistantMessageId)
+      if (exists) {
+        return prev.map(message => message.id === assistantMessageId ? assistantMessage : message)
+      }
+      return [...prev, assistantMessage]
+    })
+
+    if (modificationData) {
+      setPendingModification(modificationData)
+    }
+
+    queryClient.invalidateQueries({ queryKey: ['conversation', projectId, activeConversationId] })
+    queryClient.invalidateQueries({ queryKey: ['conversations', projectId] })
+    queryClient.invalidateQueries({ queryKey: ['characters', projectId] })
+    queryClient.invalidateQueries({ queryKey: ['worldSettings', projectId] })
+    actions.forEach((action) => {
+      const targetQueryKey = getLegacyActionTargetQueryKey(action.type)
+      if (targetQueryKey && action.data) {
+        queryClient.invalidateQueries({ queryKey: [targetQueryKey, projectId] })
+        window.dispatchEvent(new CustomEvent('projectTreeChanged', {
+          detail: {
+            actionType: LEGACY_ACTION_TO_AI_ACTION[action.type] || action.type,
+            result: action.data,
+          },
+        }))
+      }
+    })
+  }
+
+  const handleSend = async (overrideMessage?: string) => {
+    const messageText = (overrideMessage || input).trim()
+    if (!messageText || !projectId || isLoading) return
     let activeConversationId = conversationId
     const conversationHistory = buildConversationHistory(messages)
 
@@ -550,137 +939,36 @@ export const AiAssistant: React.FC<{
         ? { chapterId, chapterContent, chapterTitle: chapterTitle || '' }
         : undefined
 
-      const token = useAuthStore.getState().token
-      const response = await fetch(`${API_BASE_URL}/ai-assistant/chat-stream`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          ...(token ? { Authorization: `Bearer ${token}` } : {}),
-        },
-        body: JSON.stringify({
-          projectId,
-          message: messageText,
-          conversationHistory,
-          ...chapterContext,
-        }),
+      const streamDraft = await conversationsApi.createAssistantStream(projectId, activeConversationId, {
+        requestMessageId: savedUserMessage.id,
+        message: messageText,
+        conversationHistory,
+        ...chapterContext,
       })
-
-      if (!response.ok) {
-        throw new Error(`请求失败（${response.status}）`)
+      const streamState = parseStoredActions(streamDraft.actionsJson).__stream
+      if (!streamState) {
+        throw new Error('创建续传任务失败')
       }
 
-      const reader = response.body?.getReader()
-      if (!reader) {
-        throw new Error('无法读取响应')
-      }
-
-      const decoder = new TextDecoder('utf-8')
-      let thinkingContent = ''
-      let content = ''
-      let buffer = ''
-      let actions: AssistantAction[] = []
-      let actionCards: ChoiceCard[] = []
-      let modificationData: ChapterModificationData | undefined = undefined
-      let streamError: Error | null = null
-
-      const handleStreamLine = (line: string) => {
-        const trimmed = line.trim()
-        if (!trimmed.startsWith('data: ')) return
-
-        const payload = trimmed.substring(6).trim()
-        if (!payload || payload === '[DONE]') return
-
-        try {
-          const data = JSON.parse(payload)
-
-          if (data.error) {
-            streamError = new Error(data.error)
-            return
-          }
-
-          if (data.type === 'thinking') {
-            thinkingContent += data.content || ''
-            setStreamingThinking(thinkingContent)
-          } else if (data.type === 'content') {
-            content += data.content || ''
-            setStreamingContent(content)
-          } else if (data.type === 'action' && data.action) {
-            actions.push(data.action)
-          } else if (data.type === 'action_cards' && Array.isArray(data.cards)) {
-            actionCards = data.cards
-          } else if (data.type === 'modification') {
-            modificationData = data.data
-          } else if (data.type === 'done') {
-            actions = data.actions || actions
-            const modifyAction = actions.find(action => action.type === 'modify_chapter')
-            if (modifyAction?.data) {
-              modificationData = modifyAction.data
-            }
-          }
-        } catch (e) {
-          console.error('解析错误:', e)
-        }
-      }
-
-      while (true) {
-        const { done, value } = await reader.read()
-        if (done) break
-
-        buffer += decoder.decode(value, { stream: true })
-        const lines = buffer.split('\n')
-        buffer = lines.pop() || ''
-
-        for (const line of lines) {
-          handleStreamLine(line)
-        }
-
-        if (streamError) break
-      }
-
-      if (buffer.trim()) {
-        handleStreamLine(buffer)
-      }
-
-      if (streamError) {
-        throw streamError
-      }
-
-      setStreamingThinking('')
-      setStreamingContent('')
-
-      const outlineCard = createOutlineCard(messageText, content)
-      const nextStepCards = createNextStepCards(messageText, content, !!chapterId)
-      const cards = [outlineCard, ...actionCards, ...nextStepCards].filter((card): card is ChoiceCard => Boolean(card))
-      const savedAssistantMessage = await conversationsApi.sendMessage(projectId, activeConversationId, {
+      setMessages(prev => [...prev, {
+        id: streamDraft.id,
+        conversationId: streamDraft.conversationId,
         role: 'assistant',
-        content,
-        actionsJson: actions.length > 0 ? JSON.stringify(actions) : undefined,
-        cardsJson: cards.length > 0 ? JSON.stringify(cards) : undefined,
+        content: '',
+        timestamp: new Date(streamDraft.timestamp),
+        streamState,
+      }])
+
+      await runAssistantStream({
+        activeConversationId,
+        assistantMessageId: streamDraft.id,
+        streamState,
       })
-      const assistantMessage: Message = {
-        id: savedAssistantMessage.id,
-        conversationId: savedAssistantMessage.conversationId,
-        role: 'assistant',
-        content,
-        timestamp: new Date(savedAssistantMessage.timestamp),
-        actions: actions.length > 0 ? actions : undefined,
-        modificationData,
-        cards: cards.length > 0 ? cards : undefined,
-      }
-
-      setMessages(prev => [...prev, assistantMessage])
-
-      if (modificationData) {
-        setPendingModification(modificationData)
-      }
-
-      queryClient.invalidateQueries({ queryKey: ['conversation', projectId, activeConversationId] })
-      queryClient.invalidateQueries({ queryKey: ['conversations', projectId] })
-      queryClient.invalidateQueries({ queryKey: ['characters', projectId] })
-      queryClient.invalidateQueries({ queryKey: ['worldSettings', projectId] })
 
     } catch (error) {
       console.error('发送消息失败:', error)
+      setStreamingThinking('')
+      setStreamingContent('')
       const message = error instanceof Error ? error.message : '未知错误'
       const errorMessage: Message = {
         id: Date.now().toString(),
@@ -703,9 +991,24 @@ export const AiAssistant: React.FC<{
 
   const handleSelectCard = async (card: ChoiceCard) => {
     if (card.actionType === 'SUGGEST_PROMPT') {
+      // SUGGEST_PROMPT 类型 - 直接发送 prompt 给 AI 执行
       const prompt = typeof card.content?.prompt === 'string' ? card.content.prompt : card.description
-      setInput(prompt)
-      requestAnimationFrame(() => inputRef.current?.focus())
+      handleSend(prompt)
+      // 标记卡片为已执行
+      const ownerMessage = messages.find(message => message.cards?.some(item => item.id === card.id))
+      const ownerConversationId = ownerMessage?.conversationId || conversationId
+      if (ownerMessage?.id && ownerConversationId) {
+        const selectedAt = new Date().toISOString()
+        const updatedCards = ownerMessage.cards?.map(item =>
+          item.id === card.id ? { ...item, selectedAt } : item,
+        )
+        if (updatedCards) {
+          setMessages(prev => prev.map(message =>
+            message.id === ownerMessage.id ? { ...message, cards: updatedCards } : message,
+          ))
+          await conversationsApi.updateMessageCards(projectId, ownerConversationId, ownerMessage.id, updatedCards)
+        }
+      }
       return
     }
 
@@ -745,6 +1048,7 @@ export const AiAssistant: React.FC<{
         }
         queryClient.invalidateQueries({ queryKey: ['conversations', projectId] })
         window.dispatchEvent(new CustomEvent('projectTreeChanged', { detail: { actionType, result } }))
+        skipNextScrollRef.current = true
 
         await appendAssistantMessage(result.message || '操作已执行。', ownerConversationId)
 
@@ -755,6 +1059,8 @@ export const AiAssistant: React.FC<{
       } catch (error) {
         console.error('执行动作卡片失败:', error)
         const message = error instanceof Error ? error.message : '未知错误'
+        skipNextScrollRef.current = true
+
         await appendAssistantMessage(`执行操作失败：${message}`, conversationId, { persist: Boolean(conversationId) })
       } finally {
         setRunningCardId(null)
@@ -805,6 +1111,9 @@ export const AiAssistant: React.FC<{
         queryClient.invalidateQueries({ queryKey: ['conversation', projectId, ownerConversationId] })
       }
 
+      skipNextScrollRef.current = true
+
+
       await appendAssistantMessage(`已加入系统大纲：「${outline.title}」。你可以在大纲页面继续编辑。`, ownerConversationId)
       queryClient.invalidateQueries({ queryKey: ['outlines', projectId] })
       window.dispatchEvent(new CustomEvent('outlineCreatedFromAssistant', { detail: { outlineId: outline.id } }))
@@ -813,6 +1122,8 @@ export const AiAssistant: React.FC<{
     } catch (error) {
       console.error('执行卡片失败:', error)
       const message = error instanceof Error ? error.message : '未知错误'
+      skipNextScrollRef.current = true
+
       await appendAssistantMessage(`加入系统大纲失败：${message}`, conversationId, { persist: Boolean(conversationId) })
     } finally {
       setRunningCardId(null)
@@ -837,6 +1148,13 @@ export const AiAssistant: React.FC<{
   const handleLinkClick = (href: string) => {
     if (href === '#ai-settings' && onOpenAISettings) {
       onOpenAISettings()
+    } else if (onOpenRoute) {
+      // 移除各种可能的前缀，只保留相对路径
+      const relativePath = href
+        .replace(/^https?:\/\/[^/]+/, '')  // 移除域名
+        .replace(/^\/projects\/[^/]+/, '')  // 移除 /projects/{projectId}
+        .replace(/^\//, '')                 // 移除开头的 /
+      onOpenRoute(relativePath)
     } else {
       navigate(href)
     }
@@ -851,12 +1169,16 @@ export const AiAssistant: React.FC<{
         </CardTitle>
       </CardHeader>
 
-      <CardContent className="flex-1 overflow-y-auto p-4 space-y-4">
+      <CardContent className="flex-1 overflow-y-auto p-4 space-y-4 scrollbar-thin">
         {messages.map((message) => (
           <div
             key={message.id}
+            ref={(node) => {
+              messageRefs.current[message.id] = node
+            }}
             className={cn(
-              'flex gap-3',
+              'flex gap-3 rounded-lg transition-shadow duration-300',
+              highlightedFocus?.messageId === message.id && !highlightedFocus.cardId && 'ring-2 ring-[var(--accent-color)]/70 ring-offset-2 ring-offset-[var(--bg-primary)]',
               message.role === 'user' ? 'justify-end' : 'justify-start'
             )}
           >
@@ -921,6 +1243,8 @@ export const AiAssistant: React.FC<{
                       {getActionIcon(action.type)}
                       <span>
                         {action.type === 'create_character' && '角色已创建'}
+                        {action.type === 'update_character' && '角色已更新'}
+                        {action.type === 'delete_character' && '角色已删除'}
                         {action.type === 'create_relationship' && '关系已创建'}
                         {action.type === 'create_world_setting' && '世界观设定已创建'}
                         {action.type === 'modify_chapter' && '章节修改建议'}
@@ -934,22 +1258,21 @@ export const AiAssistant: React.FC<{
                 <div className="mt-3 space-y-2">
                   {message.cards.map((card) => {
                     const isPromptSuggestion = card.actionType === 'SUGGEST_PROMPT'
-                    const isAiAction = card.actionType === 'AI_ACTION'
                     const isSelected = !isPromptSuggestion && selectedCardIds.has(card.id)
                     const isRunning = runningCardId === card.id
                     const buttonText = isSelected
                       ? '已执行'
-                      : isPromptSuggestion
-                        ? '继续提问'
-                        : isAiAction
-                          ? '确认执行'
-                          : '加入系统大纲'
+                      : '应用'
 
                     return (
                       <div
                         key={card.id}
+                        ref={(node) => {
+                          cardRefs.current[`${message.id}:${card.id}`] = node
+                        }}
                         className={cn(
-                          'rounded border p-3 bg-[var(--bg-primary)]',
+                          'rounded border p-3 bg-[var(--bg-primary)] transition-shadow duration-300',
+                          highlightedFocus?.messageId === message.id && highlightedFocus.cardId === card.id && 'ring-2 ring-[var(--accent-color)]/70 ring-offset-2 ring-offset-[var(--bg-tertiary)]',
                           isSelected ? 'border-green-500/60' : 'border-[var(--border-color)]'
                         )}
                       >
@@ -1080,7 +1403,7 @@ export const AiAssistant: React.FC<{
             disabled={!hasValidSetup || isLoading}
             className="flex-1 resize-none px-3 py-2 bg-[var(--bg-secondary)] text-[var(--text-primary)] border border-[var(--border-color)] rounded-lg focus:ring-2 focus:ring-[var(--accent-color)] focus:border-[var(--accent-color)] placeholder-[var(--text-muted)]"
           />
-          <Button onClick={handleSend} disabled={!input.trim() || isLoading || !hasValidSetup}>
+          <Button onClick={() => handleSend()} disabled={!input.trim() || isLoading || !hasValidSetup}>
             {isLoading ? (
               <Loader2 className="w-4 h-4 animate-spin" />
             ) : (

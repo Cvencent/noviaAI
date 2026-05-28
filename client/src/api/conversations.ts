@@ -1,9 +1,42 @@
 import { apiClient as client } from './client'
 import type { Conversation, Message, ChoiceCard } from '../types/conversation'
 
+export interface CreateAssistantStreamPayload {
+  requestMessageId: string
+  message: string
+  provider?: string
+  chapterId?: string
+  chapterContent?: string
+  chapterTitle?: string
+  conversationHistory?: Array<{ role: 'user' | 'assistant'; content: string }>
+}
+
+export interface UpdateAssistantStreamPayload {
+  content: string
+  status: 'RUNNING' | 'COMPLETED' | 'FAILED'
+  actionsJson?: string
+  cardsJson?: string
+  error?: string
+}
+
+export interface CardWithMeta {
+  card: ChoiceCard
+  conversationId: string
+  conversationTitle: string
+  conversationType: string
+  messageId: string
+  messageContent: string
+  messageTimestamp: string
+}
+
 export const conversationsApi = {
   getAll: async (projectId: string): Promise<Conversation[]> => {
     const response = await client.get(`/projects/${projectId}/conversations`)
+    return response.data
+  },
+
+  getAllCards: async (projectId: string): Promise<CardWithMeta[]> => {
+    const response = await client.get(`/projects/${projectId}/conversations/cards/all`)
     return response.data
   },
 
@@ -44,6 +77,31 @@ export const conversationsApi = {
     const response = await client.patch(
       `/projects/${projectId}/conversations/${conversationId}/messages/${messageId}/cards`,
       { cardsJson: JSON.stringify(cards) },
+    )
+    return response.data
+  },
+
+  createAssistantStream: async (
+    projectId: string,
+    conversationId: string,
+    payload: CreateAssistantStreamPayload,
+  ): Promise<Message> => {
+    const response = await client.post(
+      `/projects/${projectId}/conversations/${conversationId}/assistant-streams`,
+      payload,
+    )
+    return response.data
+  },
+
+  updateAssistantStream: async (
+    projectId: string,
+    conversationId: string,
+    messageId: string,
+    payload: UpdateAssistantStreamPayload,
+  ): Promise<Message> => {
+    const response = await client.patch(
+      `/projects/${projectId}/conversations/${conversationId}/assistant-streams/${messageId}`,
+      payload,
     )
     return response.data
   },

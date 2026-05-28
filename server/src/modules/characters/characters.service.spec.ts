@@ -13,6 +13,7 @@ describe('CharactersService', () => {
       character: {
         create: jest.fn(),
         findMany: jest.fn(),
+        count: jest.fn(),
         findUnique: jest.fn(),
         update: jest.fn(),
         delete: jest.fn(),
@@ -67,6 +68,8 @@ describe('CharactersService', () => {
         { id: 'char-2', name: '李四', role: 'ANTAGONIST', relationshipsFrom: [], relationshipsTo: [] },
       ])
 
+      prisma.character.count.mockResolvedValue(2)
+
       const result = await service.findAll('project-1')
 
       expect(prisma.character.findMany).toHaveBeenCalledWith({
@@ -93,8 +96,12 @@ describe('CharactersService', () => {
             },
           },
         },
+        skip: 0,
+        take: 50,
+        orderBy: { createdAt: 'desc' },
       })
-      expect(result).toHaveLength(2)
+      expect(result.data).toHaveLength(2)
+      expect(result.total).toBe(2)
     })
 
     it('throws NotFoundException when project does not exist', async () => {

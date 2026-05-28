@@ -80,8 +80,11 @@ export class AiAssistantController {
         dto.conversationHistory,
       )) {
         res.write(`data: ${JSON.stringify(chunk)}\n\n`)
+        ;(res as any).flush?.()
       }
       res.write('data: [DONE]\n\n')
+      ;(res as any).flush?.()
+      ;(res as any).flush?.()
     } catch (error: any) {
       res.write(`data: ${JSON.stringify({ error: error.message || 'AI 助手请求失败' })}\n\n`)
       res.write('data: [DONE]\n\n')

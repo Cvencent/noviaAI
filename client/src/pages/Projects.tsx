@@ -14,13 +14,16 @@ import { ThemeToggle } from '@/components/ThemeToggle';
 import { DeleteConfirmModal } from '@/components/DeleteConfirmModal';
 import { projectsApi } from '@/api/projects';
 import { useAuthStore } from '@/store/auth';
+import { useToast } from '@/contexts/ToastContext';
 import type { CreateProjectDto, Project } from '@/types/project';
 import { ProjectWorkspace } from './ProjectWorkspace';
+import { Stagger } from '@/components/AnimatedContainer';
 
 export const Projects = () => {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   const { user, logout } = useAuthStore();
+  const { error: showErrorToast } = useToast();
   const [isCreateModalOpen, setIsCreateModalOpen] = useState(false);
   const [isAiModalOpen, setIsAiModalOpen] = useState(false);
   const [aiDescription, setAiDescription] = useState('');
@@ -121,7 +124,7 @@ export const Projects = () => {
       handleOpenProject(project);
     } catch (error) {
       console.error('AI 生成失败:', error);
-      alert('AI 生成失败，请检查 API Key 配置或稍后重试');
+      showErrorToast('AI 生成失败，请检查 API Key 配置或稍后重试');
     } finally {
       setIsAiGenerating(false);
     }
@@ -176,7 +179,7 @@ export const Projects = () => {
   return (
     <div className="h-screen flex flex-col overflow-hidden bg-[var(--bg-primary)]">
       {/* Compact header */}
-      <header className="flex items-center justify-between h-9 px-3 shrink-0 bg-[var(--bg-hover)] border-b border-[var(--border-color)]">
+      <header className="flex items-center justify-between h-9 px-3 shrink-0 glass border-b border-[var(--border-color)]">
         <div className="flex items-center gap-2">
           <div className="w-6 h-6 bg-gradient-to-br from-indigo-500 to-indigo-400 rounded-md flex items-center justify-center">
             <BookOpen className="w-3.5 h-3.5 text-white" />
@@ -275,50 +278,51 @@ export const Projects = () => {
                   </div>
                 </div>
               ) : (
-                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
+                <Stagger type="slide-up" baseDelay={100} staggerDelay={80} className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
                   {projects.map((project) => (
-                    <Card
-                      key={project.id}
-                      hoverable
-                      className="cursor-pointer group relative"
-                      onClick={() => handleOpenProject(project)}
-                    >
-                      <CardHeader className="bg-gradient-to-br from-indigo-900/20 to-amber-900/10">
-                        <div className="flex items-start justify-between">
-                          <div className="min-w-0 flex-1">
-                            <CardTitle className="line-clamp-1 text-sm">{project.title}</CardTitle>
-                            {project.subtitle && (
-                              <CardDescription className="line-clamp-1 text-xs">{project.subtitle}</CardDescription>
-                            )}
+                    <div key={project.id}>
+                      <Card
+                        hoverable
+                        className="cursor-pointer group relative glass-card"
+                        onClick={() => handleOpenProject(project)}
+                      >
+                        <CardHeader className="bg-gradient-to-br from-indigo-900/20 to-amber-900/10">
+                          <div className="flex items-start justify-between">
+                            <div className="min-w-0 flex-1">
+                              <CardTitle className="line-clamp-1 text-sm">{project.title}</CardTitle>
+                              {project.subtitle && (
+                                <CardDescription className="line-clamp-1 text-xs">{project.subtitle}</CardDescription>
+                              )}
+                            </div>
+                            <div className="flex items-center gap-1.5 ml-2 shrink-0">
+                              <span className={`px-1.5 py-0.5 rounded-full text-[10px] font-medium ${getStatusColor(project.status)}`}>
+                                {getStatusText(project.status)}
+                              </span>
+                              <button
+                                onClick={(e) => handleDeleteProject(e, project.id, project.title)}
+                                className="opacity-0 group-hover:opacity-100 transition-opacity p-1 hover:bg-red-900/40 rounded-md"
+                                title="删除项目"
+                              >
+                                <Trash2 className="w-3.5 h-3.5 text-red-400" />
+                              </button>
+                            </div>
                           </div>
-                          <div className="flex items-center gap-1.5 ml-2 shrink-0">
-                            <span className={`px-1.5 py-0.5 rounded-full text-[10px] font-medium ${getStatusColor(project.status)}`}>
-                              {getStatusText(project.status)}
+                        </CardHeader>
+                        <CardContent className="py-3">
+                          {project.synopsis && (
+                            <p className="text-xs text-[var(--text-muted)] line-clamp-2 mb-3">{project.synopsis}</p>
+                          )}
+                          <div className="flex items-center justify-between text-xs">
+                            <span className="text-[var(--text-muted)]">{project.wordCount.toLocaleString()} 字</span>
+                            <span className="text-[var(--text-secondary)]">
+                              {new Date(project.updatedAt).toLocaleDateString('zh-CN')}
                             </span>
-                            <button
-                              onClick={(e) => handleDeleteProject(e, project.id, project.title)}
-                              className="opacity-0 group-hover:opacity-100 transition-opacity p-1 hover:bg-red-900/40 rounded-md"
-                              title="删除项目"
-                            >
-                              <Trash2 className="w-3.5 h-3.5 text-red-400" />
-                            </button>
                           </div>
-                        </div>
-                      </CardHeader>
-                      <CardContent className="py-3">
-                        {project.synopsis && (
-                          <p className="text-xs text-[var(--text-muted)] line-clamp-2 mb-3">{project.synopsis}</p>
-                        )}
-                        <div className="flex items-center justify-between text-xs">
-                          <span className="text-[var(--text-muted)]">{project.wordCount.toLocaleString()} 字</span>
-                          <span className="text-[var(--text-secondary)]">
-                            {new Date(project.updatedAt).toLocaleDateString('zh-CN')}
-                          </span>
-                        </div>
-                      </CardContent>
-                    </Card>
+                        </CardContent>
+                      </Card>
+                    </div>
                   ))}
-                </div>
+                </Stagger>
               )}
             </div>
           </div>

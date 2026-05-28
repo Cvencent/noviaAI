@@ -21,6 +21,7 @@ model User {
   customWritingStyles   CustomWritingStyle[]
   writingStyleFusions   WritingStyleFusion[]
   writingStyleHistory   WritingStyleHistory[]
+  logRetentionSetting LogRetentionSetting?
 }
 
 model AIConfig {
@@ -427,19 +428,35 @@ model ApiKey {
 }
 
 model UsageLog {
-  id           String   @id @default(uuid())
-  apiKeyId     String
-  endpoint     String
-  method       String
-  statusCode   Int?
-  requestBody  String?
-  responseBody String?
-  tokensUsed   Int?
-  cost         Float?
-  ipAddress    String?
-  userAgent    String?
-  createdAt    DateTime @default(now())
-  apiKey       ApiKey   @relation(fields: [apiKeyId], references: [id], onDelete: Cascade)
+  id               String   @id @default(uuid())
+  apiKeyId         String
+  endpoint         String
+  method           String
+  model            String?
+  statusCode       Int?
+  requestBody      String?
+  responseBody     String?
+  tokensUsed       Int?
+  promptTokens     Int?
+  completionTokens Int?
+  cost             Float?
+  duration         Int?
+  ipAddress        String?
+  userAgent        String?
+  createdAt        DateTime @default(now())
+  apiKey           ApiKey   @relation(fields: [apiKeyId], references: [id], onDelete: Cascade)
+
+  @@index([createdAt])
+  @@index([model])
+}
+
+model LogRetentionSetting {
+  id          String   @id @default(uuid())
+  userId      String   @unique
+  retentionDays Int    @default(30)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
 }
 
 model CustomWritingStyle {

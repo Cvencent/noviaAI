@@ -13,6 +13,7 @@ describe('ChekhovsGunsService', () => {
       chekhovsGun: {
         create: jest.fn(),
         findMany: jest.fn(),
+        count: jest.fn(),
         findUnique: jest.fn(),
         update: jest.fn(),
         delete: jest.fn(),
@@ -81,6 +82,8 @@ describe('ChekhovsGunsService', () => {
         { id: 'gun-2', name: '神秘信件', status: 'REMINDER' },
       ])
 
+      prisma.chekhovsGun.count.mockResolvedValue(2)
+
       const result = await service.findAll('project-1')
 
       expect(prisma.chekhovsGun.findMany).toHaveBeenCalledWith({
@@ -89,9 +92,12 @@ describe('ChekhovsGunsService', () => {
           setupChapter: true,
           payoffChapter: true,
         },
+        skip: 0,
+        take: 50,
         orderBy: { createdAt: 'desc' },
       })
-      expect(result).toHaveLength(2)
+      expect(result.data).toHaveLength(2)
+      expect(result.total).toBe(2)
     })
 
     it('throws NotFoundException when project does not exist', async () => {

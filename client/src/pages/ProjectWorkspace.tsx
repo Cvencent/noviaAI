@@ -1,4 +1,4 @@
-import { lazy, Suspense, useCallback, useEffect, useState } from 'react';
+import { lazy, Suspense, useCallback, useEffect, useRef, useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useNavigate, useParams } from 'react-router-dom';
 import {
@@ -6,11 +6,14 @@ import {
   BookOpen,
   ChevronDown,
   ChevronRight,
+  Clock,
   Cpu,
+  Drama,
   FileText,
   Folder,
   FolderOpen,
   GitBranch,
+  Milestone,
   Link2,
   List,
   MapPin,
@@ -19,6 +22,7 @@ import {
   Palette,
   Settings,
   Shield,
+  Sparkles,
   Users,
 } from 'lucide-react';
 import { Button } from '@/components/ui/Button';
@@ -29,14 +33,17 @@ import { charactersApi } from '@/api/characters';
 import { worldSettingsApi } from '@/api/world-settings';
 import { plotsApi } from '@/api/plots';
 import { outlinesApi } from '@/api/outlines';
+import { storySystemApi } from '@/api/story-system';
 import { AiAssistant } from '@/components/AiAssistant';
 import { ConversationList } from '@/components/ConversationList';
+import { CardGallery } from '@/components/CardGallery';
 import { TabBar, useTabManager } from '@/components/TabBar';
 import { ErrorBoundary } from '@/components/ErrorBoundary';
 import { ThemeToggle } from '@/components/ThemeToggle';
 import { ResizablePanel } from '@/components/ResizablePanel';
 import { cn } from '@/utils/cn';
 import type { ContentChange } from '@/types/ai-changes';
+import type { ConversationFocusTarget } from '@/types/conversation';
 
 const ProjectOverview = lazy(() => import('./ProjectOverview').then(m => ({ default: m.ProjectOverview })));
 const CharacterManagement = lazy(() => import('./CharacterManagement').then(m => ({ default: m.CharacterManagement })));
@@ -45,8 +52,12 @@ const ChapterEditor = lazy(() => import('./ChapterEditor').then(m => ({ default:
 const WorldSettings = lazy(() => import('./WorldSettings').then(m => ({ default: m.WorldSettings })));
 const PlotManagement = lazy(() => import('./PlotManagement').then(m => ({ default: m.PlotManagement })));
 const OutlineManagement = lazy(() => import('./OutlineManagement').then(m => ({ default: m.OutlineManagement })));
+const SceneManagement = lazy(() => import('./SceneManagement').then(m => ({ default: m.SceneManagement })));
+const TurningPointManagement = lazy(() => import('./TurningPointManagement').then(m => ({ default: m.TurningPointManagement })));
+const TimelineManagement = lazy(() => import('./TimelineManagement').then(m => ({ default: m.TimelineManagement })));
 const EnhancedCharacterNetwork = lazy(() => import('./EnhancedCharacterNetwork').then(m => ({ default: m.EnhancedCharacterNetwork })));
 const ConsistencyCheck = lazy(() => import('./ConsistencyCheck').then(m => ({ default: m.ConsistencyCheck })));
+const ReaderExperience = lazy(() => import('./ReaderExperience').then(m => ({ default: m.ReaderExperience })));
 const StoryGraphWorkbench = lazy(() => import('./StoryGraphWorkbench').then(m => ({ default: m.StoryGraphWorkbench })));
 const UsageLogs = lazy(() => import('./UsageLogs').then(m => ({ default: m.UsageLogs })));
 const AISettingsPage = lazy(() => import('./AISettings').then(m => ({ default: m.AISettingsPage })));
@@ -67,7 +78,11 @@ const routes: TabRoute[] = [
   { path: 'chapters', label: '章节', icon: <FileText className="w-3.5 h-3.5" />, component: ChapterManagement },
   { path: 'plots', label: '情节线', icon: <GitBranch className="w-3.5 h-3.5" />, component: PlotManagement },
   { path: 'outlines', label: '大纲', icon: <List className="w-3.5 h-3.5" />, component: OutlineManagement },
+  { path: 'scenes', label: '场景', icon: <Drama className="w-3.5 h-3.5" />, component: SceneManagement },
+  { path: 'turning-points', label: '转折点', icon: <Milestone className="w-3.5 h-3.5" />, component: TurningPointManagement },
+  { path: 'timeline', label: '时间线', icon: <Clock className="w-3.5 h-3.5" />, component: TimelineManagement },
   { path: 'consistency-check', label: '一致性检查', icon: <Shield className="w-3.5 h-3.5" />, component: ConsistencyCheck },
+  { path: 'reader-experience', label: '读者体验', icon: <BookOpen className="w-3.5 h-3.5" />, component: ReaderExperience },
   { path: 'story-graph', label: 'Story Graph', icon: <Network className="w-3.5 h-3.5" />, component: StoryGraphWorkbench },
   { path: 'usage-logs', label: '使用日志', icon: <Activity className="w-3.5 h-3.5" />, component: UsageLogs },
   { path: 'ai-settings', label: 'AI 设置', icon: <Cpu className="w-3.5 h-3.5" />, component: AISettingsPage },
@@ -92,14 +107,25 @@ type NavTreeItem = {
   active?: boolean;
 };
 
+const normalizeWorkspacePath = (path?: string) => (path || '').replace(/^\/+|\/+$/g, '');
+
+const buildWorkspaceUrl = (projectId: string, path: string) =>
+  path ? `/projects/${projectId}/${path}` : `/projects/${projectId}`;
+
 export const ProjectWorkspace = ({ projectId: projectIdProp }: ProjectWorkspaceProps = {}) => {
-  const { projectId: routeProjectId } = useParams<{ projectId: string }>();
+  const { projectId: routeProjectId, '*': routeWorkspacePath } = useParams<{ projectId: string; '*': string }>();
   const projectId = projectIdProp || routeProjectId;
+  const workspacePath = normalizeWorkspacePath(routeWorkspacePath);
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   const [chapterContext, setChapterContext] = useState<ChapterContext | undefined>();
   const [selectedConversationId, setSelectedConversationId] = useState<string | undefined>();
+  const [conversationFocusTarget, setConversationFocusTarget] = useState<ConversationFocusTarget | undefined>();
+  const [sidebarView, setSidebarView] = useState<'conversations' | 'cards'>('conversations');
+  const [pendingPrompt, setPendingPrompt] = useState<string | undefined>();
+  const [autoSubmitPrompt, setAutoSubmitPrompt] = useState(false);
   const [expandedNavFolders, setExpandedNavFolders] = useState<Set<string>>(() => new Set(['characters', 'world', 'chapters', 'plots', 'outlines']));
+  const storyGraphRefreshTimerRef = useRef<number | null>(null);
   const { tabs, activeTabId, setActiveTabId, openTab, closeTab, closeAllTabs, closeTabsToRight, reorderTabs, togglePinTab, getActiveTab } = useTabManager(20);
 
   const { data: project } = useQuery({
@@ -138,11 +164,69 @@ export const ProjectWorkspace = ({ projectId: projectIdProp }: ProjectWorkspaceP
     enabled: !!projectId,
   });
 
-  useEffect(() => {
-    if (projectId && tabs.length === 0) {
-      openTab('', '概览', <BookOpen className="w-3.5 h-3.5" />);
+  const getTabMeta = useCallback((path: string) => {
+    const normalizedPath = normalizeWorkspacePath(path);
+    const [basePath, id] = normalizedPath.split('/');
+    const route = routes.find(item => item.path === normalizedPath || item.path === basePath);
+    if (!route) return null;
+
+    if (basePath === 'chapters' && id) {
+      const chapter = chapters.find(item => item.id === id);
+      return {
+        path: normalizedPath,
+        label: chapter?.title || '章节编辑',
+        icon: <FileText className="w-3.5 h-3.5" />,
+      };
     }
-  }, [projectId, tabs.length, openTab]);
+
+    if (basePath === 'outlines' && id) {
+      const outline = outlines.find(item => item.id === id);
+      return {
+        path: normalizedPath,
+        label: outline?.title || '大纲编辑',
+        icon: <List className="w-3.5 h-3.5" />,
+      };
+    }
+
+    return {
+      path: route.path,
+      label: route.label,
+      icon: route.icon,
+    };
+  }, [chapters, outlines]);
+
+  const openWorkspaceTab = useCallback((path: string, options: { navigateToTab?: boolean; replace?: boolean } = {}) => {
+    if (!projectId) return;
+    const tabMeta = getTabMeta(path);
+    if (!tabMeta) return;
+
+    openTab(tabMeta.path, tabMeta.label, tabMeta.icon);
+    if (options.navigateToTab) {
+      navigate(buildWorkspaceUrl(projectId, tabMeta.path), { replace: options.replace });
+    }
+  }, [getTabMeta, navigate, openTab, projectId]);
+
+  const initialSyncDoneRef = useRef(false);
+  useEffect(() => {
+    if (!projectId) return;
+    const targetPath = workspacePath || '';
+    const tabExists = tabs.some(t => t.path === targetPath) || targetPath === '';
+    if (tabExists) {
+      initialSyncDoneRef.current = true;
+      if (getTabMeta(targetPath)) {
+        openWorkspaceTab(targetPath, { replace: true });
+      } else {
+        openWorkspaceTab('', { navigateToTab: true, replace: true });
+      }
+    } else if (!initialSyncDoneRef.current) {
+      initialSyncDoneRef.current = true;
+      if (getTabMeta(targetPath)) {
+        openWorkspaceTab(targetPath, { replace: true });
+      } else {
+        openWorkspaceTab('', { navigateToTab: true, replace: true });
+      }
+    }
+  }, [workspacePath, projectId]);
 
   useEffect(() => {
     const handleChapterContextUpdate = (event: CustomEvent<ChapterContext | undefined>) => {
@@ -155,6 +239,24 @@ export const ProjectWorkspace = ({ projectId: projectIdProp }: ProjectWorkspaceP
 
   useEffect(() => {
     if (!projectId) return;
+
+    const scheduleStoryGraphRefresh = () => {
+      if (storyGraphRefreshTimerRef.current) {
+        window.clearTimeout(storyGraphRefreshTimerRef.current);
+      }
+
+      storyGraphRefreshTimerRef.current = window.setTimeout(async () => {
+        try {
+          await storySystemApi.createProjectionJob(projectId, { scope: 'ALL' });
+          queryClient.invalidateQueries({ queryKey: ['storyGraph', projectId] });
+          queryClient.invalidateQueries({ queryKey: ['story-graph', projectId] });
+          queryClient.invalidateQueries({ queryKey: ['projectionJobs', projectId] });
+          window.dispatchEvent(new CustomEvent('storyGraphChanged', { detail: { projectId } }));
+        } catch (error) {
+          console.warn('Story Graph 自动同步失败:', error);
+        }
+      }, 800);
+    };
 
     const refreshProjectTree = () => {
       [
@@ -171,11 +273,15 @@ export const ProjectWorkspace = ({ projectId: projectIdProp }: ProjectWorkspaceP
       ].forEach(key => {
         queryClient.invalidateQueries({ queryKey: [key, projectId] });
       });
+      scheduleStoryGraphRefresh();
     };
 
     window.addEventListener('projectTreeChanged', refreshProjectTree);
     window.addEventListener('outlineCreatedFromAssistant', refreshProjectTree);
     return () => {
+      if (storyGraphRefreshTimerRef.current) {
+        window.clearTimeout(storyGraphRefreshTimerRef.current);
+      }
       window.removeEventListener('projectTreeChanged', refreshProjectTree);
       window.removeEventListener('outlineCreatedFromAssistant', refreshProjectTree);
     };
@@ -185,22 +291,31 @@ export const ProjectWorkspace = ({ projectId: projectIdProp }: ProjectWorkspaceP
     window.dispatchEvent(new CustomEvent('aiApplyChanges', { detail: changes }));
   }, []);
 
-  const handleOpenRoute = (path: string) => {
-    const basePath = path.split('/')[0];
-    const route = routes.find(item => item.path === basePath || item.path === path);
-    if (!route) return;
+  const handleOpenRoute = useCallback((path: string) => {
+    openWorkspaceTab(path, { navigateToTab: true });
+  }, [openWorkspaceTab]);
 
-    const tabId = path.includes('/') ? path : route.path;
-    openTab(tabId, route.label, route.icon);
-  };
+  const handleOpenChapter = useCallback((chapterId: string) => {
+    handleOpenRoute(`chapters/${chapterId}`);
+  }, [handleOpenRoute]);
 
-  const handleOpenChapter = (chapterId: string, title: string) => {
-    openTab(`chapters/${chapterId}`, title || '未命名章节', <FileText className="w-3.5 h-3.5" />);
-  };
+  const handleOpenOutline = useCallback((outlineId: string) => {
+    handleOpenRoute(`outlines/${outlineId}`);
+  }, [handleOpenRoute]);
 
-  const handleOpenOutline = (outlineId: string, title: string) => {
-    openTab(`outlines/${outlineId}`, title || '未命名大纲', <List className="w-3.5 h-3.5" />);
-  };
+  const handleCloseTab = useCallback((tabId: string) => {
+    const currentIndex = tabs.findIndex(t => t.id === tabId);
+    const remaining = tabs.filter(t => t.id !== tabId);
+    closeTab(tabId);
+    if (activeTabId === tabId && remaining.length > 0) {
+      const nextActive = remaining[currentIndex > 0 ? currentIndex - 1 : 0];
+      if (nextActive && projectId) {
+        navigate(buildWorkspaceUrl(projectId, nextActive.path), { replace: true });
+      }
+    } else if (remaining.length === 0 && projectId) {
+      navigate(buildWorkspaceUrl(projectId, ''), { replace: true });
+    }
+  }, [closeTab, tabs, activeTabId, projectId, navigate]);
 
   const toggleNavFolder = (path: string) => {
     setExpandedNavFolders(prev => {
@@ -215,11 +330,18 @@ export const ProjectWorkspace = ({ projectId: projectIdProp }: ProjectWorkspaceP
   };
 
   const handleOpenProjectSettings = () => {
-    openTab('settings', '项目设置', <Settings className="w-3.5 h-3.5" />);
+    handleOpenRoute('settings');
   };
 
   const handleCreateConversation = useCallback(() => {
     setSelectedConversationId(undefined);
+  }, []);
+
+  const handleAskAI = useCallback((prompt: string) => {
+    setSidebarView('conversations');
+    setSelectedConversationId(undefined);
+    setPendingPrompt(prompt);
+    setAutoSubmitPrompt(true);
   }, []);
 
   const activeTab = getActiveTab();
@@ -266,7 +388,6 @@ export const ProjectWorkspace = ({ projectId: projectIdProp }: ProjectWorkspaceP
         label: character.name || '未命名人物',
         icon: <Users className="w-3.5 h-3.5 shrink-0" />,
         onClick: () => handleOpenRoute('characters'),
-        active: activeTab?.path === 'characters',
       })),
     },
     world: {
@@ -277,7 +398,6 @@ export const ProjectWorkspace = ({ projectId: projectIdProp }: ProjectWorkspaceP
         label: setting.category ? `${setting.category} / ${setting.name}` : setting.name,
         icon: <MapPin className="w-3.5 h-3.5 shrink-0" />,
         onClick: () => handleOpenRoute('world'),
-        active: activeTab?.path === 'world',
       })),
     },
     chapters: {
@@ -289,7 +409,7 @@ export const ProjectWorkspace = ({ projectId: projectIdProp }: ProjectWorkspaceP
           id: chapter.id,
           label: chapter.title || `第 ${chapter.order} 章`,
           icon: <FileText className="w-3.5 h-3.5 shrink-0" />,
-          onClick: () => handleOpenChapter(chapter.id, chapter.title),
+          onClick: () => handleOpenChapter(chapter.id),
           active: activeTab?.path === chapterPath,
         };
       }),
@@ -302,7 +422,6 @@ export const ProjectWorkspace = ({ projectId: projectIdProp }: ProjectWorkspaceP
         label: plot.title || '未命名情节线',
         icon: <GitBranch className="w-3.5 h-3.5 shrink-0" />,
         onClick: () => handleOpenRoute('plots'),
-        active: activeTab?.path === 'plots',
       })),
     },
     outlines: {
@@ -312,7 +431,7 @@ export const ProjectWorkspace = ({ projectId: projectIdProp }: ProjectWorkspaceP
         id: outline.id,
         label: outline.title || '未命名大纲',
         icon: <List className="w-3.5 h-3.5 shrink-0" />,
-        onClick: () => handleOpenOutline(outline.id, outline.title),
+        onClick: () => handleOpenOutline(outline.id),
         active: activeTab?.path === `outlines/${outline.id}`,
       })),
     },
@@ -440,14 +559,62 @@ export const ProjectWorkspace = ({ projectId: projectIdProp }: ProjectWorkspaceP
           maxWidth={700}
         >
           <div className="h-full overflow-hidden flex">
-            <div className="w-40 shrink-0 border-r border-[var(--border-color)] bg-[var(--bg-primary)]">
-              <ConversationList
-                currentConversationId={selectedConversationId}
-                onSelectConversation={setSelectedConversationId}
-                onCreateConversation={handleCreateConversation}
-              />
+            <div className="w-48 shrink-0 border-r border-[var(--border-color)] bg-[var(--bg-primary)] flex flex-col">
+              {/* Sidebar header with toggle */}
+              <div className="flex border-b border-[var(--border-color)]">
+                <button
+                  onClick={() => setSidebarView('conversations')}
+                  className={cn(
+                    'flex-1 flex items-center justify-center gap-1.5 py-2 text-[10px] font-medium transition-colors',
+                    sidebarView === 'conversations'
+                      ? 'text-[var(--accent-color)] border-b-2 border-[var(--accent-color)]'
+                      : 'text-[var(--text-muted)] hover:text-[var(--text-primary)]'
+                  )}
+                >
+                  <MessageSquare className="w-3 h-3" />
+                  对话
+                </button>
+                <button
+                  onClick={() => setSidebarView('cards')}
+                  className={cn(
+                    'flex-1 flex items-center justify-center gap-1.5 py-2 text-[10px] font-medium transition-colors',
+                    sidebarView === 'cards'
+                      ? 'text-[var(--accent-color)] border-b-2 border-[var(--accent-color)]'
+                      : 'text-[var(--text-muted)] hover:text-[var(--text-primary)]'
+                  )}
+                >
+                  <Sparkles className="w-3 h-3" />
+                  卡片库
+                </button>
+              </div>
+              {/* Sidebar content */}
+              <div className="flex-1 overflow-hidden">
+                {sidebarView === 'conversations' ? (
+                  <ConversationList
+                    currentConversationId={selectedConversationId}
+                    onSelectConversation={setSelectedConversationId}
+                    onCreateConversation={handleCreateConversation}
+                  />
+                ) : (
+                  <CardGallery
+                    projectId={projectId || ''}
+                    onNavigateToConversation={(target) => {
+                      setSelectedConversationId(target.conversationId)
+                      setConversationFocusTarget(target)
+                      setSidebarView('conversations')
+                    }}
+                    onAutoSubmitPrompt={(conversationId, prompt) => {
+                      setSelectedConversationId(conversationId)
+                      setSidebarView('conversations')
+                      setPendingPrompt(prompt)
+                      setAutoSubmitPrompt(true)
+                    }}
+                    onOpenRoute={handleOpenRoute}
+                  />
+                )}
+              </div>
             </div>
-            <div className="flex-1 min-w-0">
+            <div className="flex-1 min-w-0 h-full">
               <AiAssistant
                 projectId={projectId || ''}
                 chapterId={chapterContext?.chapterId}
@@ -455,9 +622,16 @@ export const ProjectWorkspace = ({ projectId: projectIdProp }: ProjectWorkspaceP
                 chapterTitle={chapterContext?.chapterTitle}
                 onApplyChanges={handleApplyChanges}
                 onOpenRoute={handleOpenRoute}
-                onOpenAISettings={() => openTab('ai-settings', 'AI 设置', <Cpu className="w-3.5 h-3.5" />)}
+                onOpenAISettings={() => handleOpenRoute('ai-settings')}
                 conversationId={selectedConversationId}
+                focusTarget={conversationFocusTarget}
                 onConversationCreated={setSelectedConversationId}
+                pendingPrompt={pendingPrompt}
+                autoSubmit={autoSubmitPrompt}
+                onPendingPromptUsed={() => {
+                  setPendingPrompt(undefined)
+                  setAutoSubmitPrompt(false)
+                }}
               />
             </div>
           </div>
@@ -469,17 +643,22 @@ export const ProjectWorkspace = ({ projectId: projectIdProp }: ProjectWorkspaceP
             tabs={tabs}
             activeTabId={activeTabId}
             onTabClick={setActiveTabId}
-            onTabClose={closeTab}
+            onTabClose={handleCloseTab}
             onCloseAll={closeAllTabs}
             onCloseRight={closeTabsToRight}
             onReorderTab={reorderTabs}
             onTogglePin={togglePinTab}
+            onTabChange={(path) => {
+              if (projectId) {
+                navigate(buildWorkspaceUrl(projectId, normalizeWorkspacePath(path)));
+              }
+            }}
           />
           <ErrorBoundary>
             <div className="flex-1 overflow-auto bg-[var(--bg-primary)]">
               {ActiveComponent ? (
                 <Suspense fallback={<div className="flex items-center justify-center h-full"><LoadingSpinner /></div>}>
-                  <ActiveComponent projectId={projectId || ''} onOpenRoute={handleOpenRoute} {...extraProps} />
+                  <ActiveComponent projectId={projectId || ''} onOpenRoute={handleOpenRoute} onAskAI={handleAskAI} {...extraProps} />
                 </Suspense>
               ) : (
                 <div className="flex items-center justify-center h-full text-[var(--text-muted)]">选择一个页面开始</div>

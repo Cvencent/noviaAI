@@ -21,16 +21,28 @@ export function StoryGraphWorkbench() {
 
   useEffect(() => {
     if (!projectId) return
-    setIsLoading(true)
-    Promise.all([
-      storySystemApi.listGraphEntities(projectId).catch(() => []),
-      storySystemApi.listOpenLoops(projectId).catch(() => []),
-      storySystemApi.listWorldFacts(projectId).catch(() => []),
-    ]).then(([entityData, loopData, factData]) => {
-      setEntities(entityData)
-      setLoops(loopData)
-      setFacts(factData)
-    }).finally(() => setIsLoading(false))
+    const refreshGraph = () => {
+      setIsLoading(true)
+      Promise.all([
+        storySystemApi.listGraphEntities(projectId).catch(() => []),
+        storySystemApi.listOpenLoops(projectId).catch(() => []),
+        storySystemApi.listWorldFacts(projectId).catch(() => []),
+      ]).then(([entityData, loopData, factData]) => {
+        setEntities(entityData)
+        setLoops(loopData)
+        setFacts(factData)
+      }).finally(() => setIsLoading(false))
+    }
+    const handleStoryGraphChanged = (event: Event) => {
+      const changedProjectId = (event as CustomEvent<{ projectId?: string }>).detail?.projectId
+      if (!changedProjectId || changedProjectId === projectId) {
+        refreshGraph()
+      }
+    }
+
+    refreshGraph()
+    window.addEventListener('storyGraphChanged', handleStoryGraphChanged)
+    return () => window.removeEventListener('storyGraphChanged', handleStoryGraphChanged)
   }, [projectId])
 
   const findPath = async () => {
