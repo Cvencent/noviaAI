@@ -113,8 +113,18 @@ export const UsageLogs = () => {
   }
 
   const LogDetailPanel = ({ log }: { log: UsageLogType }) => {
-    const promptText = log.promptContent || (typeof log.requestBody === 'string' ? log.requestBody : JSON.stringify(log.requestBody, null, 2)) || '无数据'
-    const responseText = log.responseContent || (typeof log.responseBody === 'string' ? log.responseBody : JSON.stringify(log.responseBody, null, 2)) || '无数据'
+    const formatContent = (content?: string | object | null): string => {
+      if (!content) return '无数据'
+      const raw = typeof content === 'string' ? content : JSON.stringify(content, null, 2)
+      try {
+        const parsed = JSON.parse(raw)
+        return JSON.stringify(parsed, null, 2)
+      } catch {
+        return raw
+      }
+    }
+    const promptText = formatContent(log.promptContent || log.requestBody)
+    const responseText = formatContent(log.responseContent || log.responseBody)
 
     return (
       <div className="border-t border-[var(--border-color)] bg-[var(--bg-primary)]">
