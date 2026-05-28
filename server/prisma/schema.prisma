@@ -436,6 +436,8 @@ model UsageLog {
   statusCode       Int?
   requestBody      String?
   responseBody     String?
+  promptContent    String?
+  responseContent  String?
   tokensUsed       Int?
   promptTokens     Int?
   completionTokens Int?

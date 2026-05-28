@@ -57,6 +57,8 @@ export class UsageLogsService {
         statusCode: createUsageLogDto.statusCode,
         requestBody: createUsageLogDto.requestBody,
         responseBody: createUsageLogDto.responseBody,
+        promptContent: createUsageLogDto.promptContent,
+        responseContent: createUsageLogDto.responseContent,
         tokensUsed: createUsageLogDto.tokensUsed,
         cost: createUsageLogDto.cost,
         ipAddress: createUsageLogDto.ipAddress,

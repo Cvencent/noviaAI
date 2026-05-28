@@ -1,5 +1,5 @@
 import { apiClient } from './client'
-import type { UsageLog, UsageStats, UsageLogsResponse } from '@/types/usage-log'
+import type { UsageLog, UsageStats, UsageLogsResponse, LogRetentionSetting } from '@/types/usage-log'
 
 export const usageLogsApi = {
   getLogs: async (
@@ -26,6 +26,28 @@ export const usageLogsApi = {
   getById: async (projectId: string, logId: string): Promise<UsageLog> => {
     const response = await apiClient.get<UsageLog>(
       `/projects/${projectId}/usage-logs/${logId}`
+    )
+    return response.data
+  },
+
+  getRetention: async (projectId: string): Promise<LogRetentionSetting> => {
+    const response = await apiClient.get<LogRetentionSetting>(
+      `/projects/${projectId}/usage-logs/retention`
+    )
+    return response.data
+  },
+
+  updateRetention: async (projectId: string, retentionDays: number): Promise<LogRetentionSetting> => {
+    const response = await apiClient.patch<LogRetentionSetting>(
+      `/projects/${projectId}/usage-logs/retention`,
+      { retentionDays }
+    )
+    return response.data
+  },
+
+  cleanup: async (projectId: string): Promise<{ deleted: number; retentionDays: number }> => {
+    const response = await apiClient.post<{ deleted: number; retentionDays: number }>(
+      `/projects/${projectId}/usage-logs/cleanup`
     )
     return response.data
   },

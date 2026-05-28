@@ -62,18 +62,20 @@ export class AiService {
       : [{ role: 'user' as const, content: dto.message }]
 
     try {
+      const startTime = Date.now()
       const result = await provider.chat({
         model,
         messages,
         temperature: dto.temperature,
         maxTokens: dto.maxTokens,
       })
+      const duration = Date.now() - startTime
 
-      await this.logUsage(userId, dto.projectId, 'chat', 'POST', 200, messages, result)
+      await this.logUsage(userId, dto.projectId, 'chat', 'POST', 200, messages, result, { model, duration })
 
       return { response: result }
     } catch (error: any) {
-      await this.logUsage(userId, dto.projectId, 'chat', 'POST', 500, messages, null)
+      await this.logUsage(userId, dto.projectId, 'chat', 'POST', 500, messages, null, { model })
       throw new InternalServerErrorException(`AI 调用失败: ${error.message}`)
     }
   }
@@ -469,8 +471,9 @@ ${template.promptBlocks.chapter}
     endpoint: string,
     method: string,
     statusCode: number,
-    requestBody: any,
-    responseBody: any,
+    messages: ChatMessage[],
+    result: any,
+    options?: { model?: string; duration?: number; tokensUsed?: number },
   ) {
     try {
       const apiKeys = await this.prisma.apiKey.findMany({
@@ -479,13 +482,23 @@ ${template.promptBlocks.chapter}
       })
 
       if (apiKeys.length > 0) {
+        const promptContent = messages?.map(m => `[${m.role}]\n${m.content}`).join('\n\n') || ''
+        const responseContent = typeof result === 'string' ? result : (result ? JSON.stringify(result) : '')
+        const promptTokens = promptContent.length > 0 ? Math.ceil(promptContent.length / 4) : undefined
+
         await this.usageLogsService.create(projectId, {
           apiKeyId: apiKeys[0].id,
           endpoint,
           method,
           statusCode,
-          requestBody: requestBody ? JSON.stringify(requestBody) : undefined,
-          responseBody: responseBody ? JSON.stringify(responseBody) : undefined,
+          requestBody: messages ? JSON.stringify(messages) : undefined,
+          responseBody: result ? JSON.stringify(result) : undefined,
+          model: options?.model,
+          duration: options?.duration,
+          promptContent: promptContent || undefined,
+          responseContent: responseContent || undefined,
+          promptTokens,
+          tokensUsed: options?.tokensUsed,
         })
       }
     } catch (error) {

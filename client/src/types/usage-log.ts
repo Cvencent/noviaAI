@@ -6,8 +6,14 @@ export interface UsageLog {
   statusCode?: number
   requestBody?: object
   responseBody?: object
+  model?: string
+  promptContent?: string
+  responseContent?: string
   tokensUsed?: number
+  promptTokens?: number
+  completionTokens?: number
   cost?: number
+  duration?: number
   ipAddress?: string
   userAgent?: string
   createdAt: string
@@ -47,4 +53,12 @@ export interface UsageLogsResponse {
     total: number
     totalPages: number
   }
+}
+
+export interface LogRetentionSetting {
+  id: string
+  userId: string
+  retentionDays: number
+  createdAt: string
+  updatedAt: string
 }

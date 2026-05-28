@@ -2,6 +2,7 @@ import {
   Controller,
   Get,
   Post,
+  Patch,
   Body,
   Param,
   Query,
@@ -11,6 +12,14 @@ import { UsageLogsService } from './usage-logs.service'
 import { CreateUsageLogDto } from './dto'
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard'
 import { CurrentUser } from '../auth/decorators/current-user.decorator'
+import { IsOptional, IsNumber, Min, Max } from 'class-validator'
+
+class UpdateRetentionDto {
+  @IsNumber()
+  @Min(1)
+  @Max(365)
+  retentionDays: number
+}
 
 @Controller('projects/:projectId/usage-logs')
 @UseGuards(JwtAuthGuard)
@@ -53,5 +62,30 @@ export class UsageLogsController {
     @Param('id') id: string,
   ) {
     return this.usageLogsService.findOne(projectId, id)
+  }
+
+  @Get('retention')
+  async getRetention(
+    @CurrentUser() user: any,
+    @Param('projectId') projectId: string,
+  ) {
+    return this.usageLogsService.getRetentionSetting(user.id)
+  }
+
+  @Patch('retention')
+  async updateRetention(
+    @CurrentUser() user: any,
+    @Param('projectId') projectId: string,
+    @Body() dto: UpdateRetentionDto,
+  ) {
+    return this.usageLogsService.updateRetentionSetting(user.id, dto.retentionDays)
+  }
+
+  @Post('cleanup')
+  async cleanup(
+    @CurrentUser() user: any,
+    @Param('projectId') projectId: string,
+  ) {
+    return this.usageLogsService.cleanupExpiredLogs(user.id)
   }
 }
