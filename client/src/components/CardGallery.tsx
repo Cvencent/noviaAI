@@ -323,7 +323,7 @@ export const CardGallery: React.FC<CardGalleryProps> = ({
                     <div className="flex items-start justify-between gap-2">
                       <div className="min-w-0">
                         <div className="text-xs font-medium text-[var(--text-primary)] leading-relaxed">
-                          {card.title}
+                          <span className="block truncate">{card.title}</span>
                         </div>
                         <div className="text-[10px] text-[var(--text-muted)] mt-0.5 leading-relaxed line-clamp-2">
                           {card.description}
@@ -333,16 +333,15 @@ export const CardGallery: React.FC<CardGalleryProps> = ({
                     </div>
 
                     {/* Source info */}
-                    <div className="flex items-center gap-1.5 mt-2 text-[10px] text-[var(--text-muted)]">
-                      <span className="flex items-center gap-1 truncate max-w-[120px]">
+                    <div className="mt-2 text-[10px] text-[var(--text-muted)]">
+                      <div className="flex items-center gap-1 truncate">
                         <MessageSquare className="w-2.5 h-2.5 shrink-0" />
                         <span className="truncate">{conversationTitle}</span>
-                      </span>
-                      <span>·</span>
-                      <span className="flex items-center gap-0.5">
-                        <Clock className="w-2.5 h-2.5" />
-                        {formatDate(messageTimestamp)}
-                      </span>
+                      </div>
+                      <div className="flex items-center gap-0.5 mt-0.5">
+                        <Clock className="w-2.5 h-2.5 shrink-0" />
+                        <span className="whitespace-nowrap">{formatDate(messageTimestamp)}</span>
+                      </div>
                     </div>
 
                     <div className="mt-2">
