@@ -55,6 +55,14 @@ export class UsageLogsController {
     return this.usageLogsService.getStats(projectId)
   }
 
+  @Get('retention')
+  async getRetention(
+    @CurrentUser() user: any,
+    @Param('projectId') projectId: string,
+  ) {
+    return this.usageLogsService.getRetentionSetting(user.id)
+  }
+
   @Get(':id')
   async findOne(
     @CurrentUser() user: any,
@@ -62,14 +70,6 @@ export class UsageLogsController {
     @Param('id') id: string,
   ) {
     return this.usageLogsService.findOne(projectId, id)
-  }
-
-  @Get('retention')
-  async getRetention(
-    @CurrentUser() user: any,
-    @Param('projectId') projectId: string,
-  ) {
-    return this.usageLogsService.getRetentionSetting(user.id)
   }
 
   @Patch('retention')

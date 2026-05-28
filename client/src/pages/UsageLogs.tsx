@@ -39,18 +39,21 @@ export const UsageLogs = () => {
     queryKey: ['usage-logs-stats', projectId],
     queryFn: () => usageLogsApi.getStats(projectId!),
     enabled: !!projectId,
+    retry: false,
   })
 
   const { data: logsData, isLoading: logsLoading } = useQuery({
     queryKey: ['usage-logs', projectId, page],
     queryFn: () => usageLogsApi.getLogs(projectId!, page, 20),
     enabled: !!projectId,
+    retry: false,
   })
 
   const { data: retentionSetting } = useQuery({
     queryKey: ['usage-logs-retention', projectId],
     queryFn: () => usageLogsApi.getRetention(projectId!),
     enabled: !!projectId,
+    retry: false,
   })
 
   const updateRetentionMutation = useMutation({
